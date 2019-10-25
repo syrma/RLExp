@@ -48,44 +48,51 @@ class Buffer(object):
         self.size = size
         self.n_acts = n_acts
 
-        self.obs_buf = tf.Variable(tf.zeros((size,) + obs_shape))
-        self.act_buf = tf.Variable(tf.zeros((size,), dtype=tf.int64))
-        self.rew_buf = tf.Variable(tf.zeros((size,)))
-        self.prob_buf = tf.Variable(tf.zeros((size,)))
-
+        self.obs_buf = tf.TensorArray(tf.float32, size)
+        self.act_buf = tf.TensorArray(tf.int64, size)
+        self.rew_buf = tf.TensorArray(tf.float32, size)
+        self.prob_buf = tf.TensorArray(tf.float32, size)
 
         self.rets = []
         self.lens = []
 
-        self.V_hats = tf.Variable(tf.zeros((size,)))
-        self.gae = tf.Variable(tf.zeros((size,)))
+        self.V_hats = tf.TensorArray(tf.float32, size)
+        self.gae = tf.TensorArray(tf.float32, size)
 
         self.gam = gam
         self.lam = lam
 
     #@tf.function
     def store(self, obs, act, rew, prob):
-        self.obs_buf[self.ptr].assign(obs)
-        self.act_buf[self.ptr].assign(act)
-        self.rew_buf[self.ptr].assign(rew)
-        self.prob_buf[self.ptr].assign(prob)
+        self.obs_buf = self.obs_buf.write(self.ptr, obs)
+        self.act_buf = self.act_buf.write(self.ptr, act)
+        self.rew_buf = self.rew_buf.write(self.ptr, rew)
+        self.prob_buf = self.prob_buf.write(self.ptr, prob)
         self.ptr += 1
 
     #@tf.function
     def finish_path(self, last_val=0):
-        current_episode = slice(self.last_idx, self.ptr)
+        current_episode = tf.range(self.last_idx, self.ptr)
         self.lens.append(self.ptr - self.last_idx)
-        self.rets.append(tf.reduce_sum(self.rew_buf[current_episode]) + last_val)
+        self.rets.append(tf.reduce_sum(self.rew_buf.gather(current_episode)) + last_val)
 
-        self.V_hats[current_episode].assign(discount_cumsum(self.gam, self.rew_buf[current_episode]))
+        self.V_hats = self.V_hats.scatter(current_episode, discount_cumsum(self.gam, self.rew_buf.gather(current_episode)))
 
-        Vs = tf.squeeze(value_model.apply(self.obs_buf[current_episode]), axis=1)
+        Vs = tf.squeeze(value_model(self.obs_buf.gather(current_episode)), axis=1)
         Vsp1 = tf.concat([Vs[1:], [last_val]], axis=0)
-        deltas = self.rew_buf[current_episode] + self.gam * Vsp1 - Vs 
+        deltas = self.rew_buf.gather(current_episode) + self.gam * Vsp1 - Vs
 
-        self.gae[current_episode].assign(discount_cumsum(self.gam * self.lam, deltas))
+        self.gae.scatter(current_episode, discount_cumsum(self.gam * self.lam, deltas))
 
         self.last_idx = self.ptr
+        if self.ptr==self.size:
+            self.obs_buf = self.obs_buf.stack()
+            self.act_buf = self.act_buf.stack()
+            self.rew_buf = self.rew_buf.stack()
+            self.prob_buf = self.prob_buf.stack()
+
+            self.V_hats = self.V_hats.stack()
+            self.gae = self.gae.stack()
 
     #@tf.function
     def loss(self, minibatch_start, minibatch_size):
@@ -104,10 +111,10 @@ class Buffer(object):
 
 @tf.function
 def action(obs):
-      logits = model(tf.reshape(obs, (1,-1)))
-      action = tf.squeeze(tf.random.categorical(logits, num_samples=1), axis=(0,1))
-      prob = tf.nn.softmax(logits)[0,action]
-      return action, prob
+    logits = model(tf.reshape(obs, (1,-1)))
+    action = tf.squeeze(tf.random.categorical(logits, num_samples=1), axis=(0,1))
+    prob = tf.nn.softmax(logits)[0,action]
+    return action, prob
 
 def run_one_episode(buf):
     obs = env.reset()
@@ -145,7 +152,6 @@ def train_one_epoch():
     run_time = train_start_time - start_time
 
     print('run', run_time, 'train', train_time)
-
     value_model.fit(batch.obs_buf.numpy(), batch.V_hats.numpy(), batch_size=minibatch_size)
 
     return batch.rets, batch.lens

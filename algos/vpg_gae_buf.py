@@ -34,7 +34,6 @@ value_model = tf.keras.models.Sequential([
 value_model.compile('adam', loss='MSE')
 value_model.summary()
 
-@tf.function
 def discount_cumsum(discount_factor, xs):
     # discounts = [1, discount_factor, discount_factor**2, ...]
     discounts = tf.math.cumprod(tf.fill(xs.shape, discount_factor), exclusive=True)
@@ -47,42 +46,48 @@ class Buffer(object):
         self.size = size
         self.n_acts = n_acts
 
-        self.obs_buf = tf.Variable(tf.zeros((size,) + obs_shape))
-        self.act_buf = tf.Variable(tf.zeros((size,), dtype=tf.int64))
-        self.rew_buf = tf.Variable(tf.zeros((size,)))
+        self.obs_buf = tf.TensorArray(tf.float32, size)
+        self.act_buf = tf.TensorArray(tf.int64, size)
+        self.rew_buf = tf.TensorArray(tf.float32, size)
 
         self.rets = []
         self.lens = []
 
-        self.V_hats = tf.Variable(tf.zeros((size,)))
-        self.GAE = tf.Variable(tf.zeros((size,)))
-        self.weights = tf.Variable(tf.zeros((size,)))
+        self.V_hats = tf.TensorArray(tf.float32, size)
+        self.gae = tf.TensorArray(tf.float32, size)
 
         self.gam = gam
         self.lam = lam
 
     #@tf.function
     def store(self, obs, act, rew):
-        self.obs_buf[self.ptr].assign(obs)
-        self.act_buf[self.ptr].assign(act)
-        self.rew_buf[self.ptr].assign(rew)
+        self.obs_buf = self.obs_buf.write(self.ptr, obs)
+        self.act_buf = self.act_buf.write(self.ptr, act)
+        self.rew_buf = self.rew_buf.write(self.ptr, rew)
         self.ptr += 1
 
     #@tf.function
     def finish_path(self, last_val=0):
-        current_episode = slice(self.last_idx, self.ptr)
+        current_episode = range(self.last_idx, self.ptr)
         self.lens.append(self.ptr - self.last_idx)
-        self.rets.append(tf.reduce_sum(self.rew_buf[current_episode]) + last_val)
+        self.rets.append(tf.reduce_sum(self.rew_buf.gather(current_episode)) + last_val)
 
-        self.V_hats[current_episode].assign(discount_cumsum(self.gam, self.rew_buf[current_episode]))
+        self.V_hats.scatter(current_episode, discount_cumsum(self.gam, self.rew_buf.gather(current_episode)))
 
-        Vs = tf.squeeze(value_model.apply(self.obs_buf[current_episode]), axis=1)
+        Vs = tf.squeeze(value_model(self.obs_buf.gather(current_episode)), axis=1)
         Vsp1 = tf.concat([Vs[1:], [last_val]], axis=0)
-        deltas = self.rew_buf[current_episode] + self.gam * Vsp1 - Vs 
+        deltas = self.rew_buf.gather(current_episode) + self.gam * Vsp1 - Vs
 
-        self.weights[current_episode].assign(discount_cumsum(self.gam * self.lam, deltas))
+        self.gae.scatter(current_episode, discount_cumsum(self.gam * self.lam, deltas))
 
         self.last_idx = self.ptr
+        if self.ptr==self.size:
+            self.obs_buf = self.obs_buf.stack()
+            self.act_buf = self.act_buf.stack()
+            self.rew_buf = self.rew_buf.stack()
+
+            self.V_hats = self.V_hats.stack()
+            self.gae = self.gae.stack()
 
     #@tf.function
     def loss(self):
@@ -90,7 +95,7 @@ class Buffer(object):
         action_masks = tf.one_hot(self.act_buf, n_acts)
         log_probs = tf.reduce_sum(action_masks * tf.nn.log_softmax(logits),
                                   axis=1)
-        return -tf.reduce_mean(self.weights * log_probs)
+        return -tf.reduce_mean(self.gae * log_probs)
 
 @tf.function
 def action(obs):
