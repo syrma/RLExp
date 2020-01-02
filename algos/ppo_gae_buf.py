@@ -82,7 +82,7 @@ class Buffer(object):
         Vsp1 = tf.concat([Vs[1:], [last_val]], axis=0)
         deltas = self.rew_buf.gather(current_episode) + self.gam * Vsp1 - Vs
 
-        self.gae.scatter(current_episode, discount_cumsum(self.gam * self.lam, deltas))
+        self.gae = self.gae.scatter(current_episode, discount_cumsum(self.gam * self.lam, deltas))
 
         self.last_idx = self.ptr
         if self.ptr==self.size:
