@@ -72,13 +72,13 @@ class Buffer(object):
         self.lens.append(self.ptr - self.last_idx)
         self.rets.append(tf.reduce_sum(self.rew_buf.gather(current_episode)) + last_val)
 
-        self.V_hats.scatter(current_episode, discount_cumsum(self.gam, self.rew_buf.gather(current_episode)))
+        self.V_hats = self.V_hats.scatter(current_episode, discount_cumsum(self.gam, self.rew_buf.gather(current_episode)))
 
         Vs = tf.squeeze(value_model(self.obs_buf.gather(current_episode)), axis=1)
         Vsp1 = tf.concat([Vs[1:], [last_val]], axis=0)
         deltas = self.rew_buf.gather(current_episode) + self.gam * Vsp1 - Vs
 
-        self.gae.scatter(current_episode, discount_cumsum(self.gam * self.lam, deltas))
+        self.gae = self.gae.scatter(current_episode, discount_cumsum(self.gam * self.lam, deltas))
 
         self.last_idx = self.ptr
         if self.ptr==self.size:
