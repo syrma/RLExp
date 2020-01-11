@@ -7,6 +7,7 @@ import time
 from baselines import logger
 
 env = gym.make('Walker2DBulletEnv-v0')
+#env.render(mode = 'human')
 obs_shape = env.observation_space.shape
 n_acts = env.action_space.shape[0]
 
@@ -136,6 +137,12 @@ def train_one_epoch():
 
 first_start_time = time.time()
 
+def save_model():
+    save_path = ("./model")
+    ckpt = tf.train.Checkpoint(model=model)
+    manager = tf.train.CheckpointManager(ckpt, save_path, max_to_keep=None)
+    manager.save()
+
 #training loop
 for i in range(1, epochs+1):
     start_time = time.time()
@@ -152,5 +159,5 @@ for i in range(1, epochs+1):
 
     logger.dumpkvs()
 
-env.action_space
+save_model()
 

@@ -1,9 +1,10 @@
 import tensorflow as tf
 import gym
+import pybullet_envs
 from baselines import logger
 import time
 
-env = gym.make('Walker2d-v2')
+env = gym.make('Walker2DBulletEnv-v0')
 obs_shape = env.observation_space.shape
 n_acts = env.action_space.shape[0]
 
@@ -35,14 +36,14 @@ def discount_cumsum(discount_factor, xs):
     return tf.math.cumsum(discounts * xs, reverse=True)
 
 class Buffer(object):
-    def __init__(self, obs_shape, n_acts, size=5000, gam=0.99, lam=0.97):
+    def __init__(self, obs_shape, n_acts, size, gam=0.99, lam=0.97):
         self.ptr = 0
         self.last_idx = 0
         self.size = size
         self.n_acts = n_acts
 
         self.obs_buf = tf.TensorArray(tf.float32, size)
-        self.act_buf = tf.TensorArray(tf.int64, size)
+        self.act_buf = tf.TensorArray(tf.float32, size)
         self.rew_buf = tf.TensorArray(tf.float32, size)
         self.prob_buf = tf.TensorArray(tf.float32, size)
 
@@ -104,9 +105,11 @@ class Buffer(object):
 
 @tf.function
 def action(obs):
-    logits = model(tf.reshape(obs, (1,-1)))
-    action = tf.squeeze(tf.random.categorical(logits, num_samples=1), axis=(0,1))
-    prob = tf.nn.softmax(logits)[0,action]
+    logits = model(tf.expand_dims(obs, 0))
+    action = tf.squeeze(logits, axis=0)
+    print(logits[0][1])
+    prob=0.0
+    prob = tf.nn.softmax(logits)[action]
     return action, prob
 
 def run_one_episode(buf):
@@ -152,7 +155,7 @@ def train_one_epoch():
 #training loop
 
 first_start_time = time.time()
-for i in range(epochs):
+for i in range(1, epochs+1):
     start_time = time.time()
     batch_rets, batch_lens = train_one_epoch()
     now = time.time()
