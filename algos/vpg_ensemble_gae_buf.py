@@ -1,17 +1,13 @@
 import tensorflow as tf
 import gym
-import pybullet_envs
 
 import time
 
-from baselines import logger
-
-env = gym.make('Walker2DBulletEnv-v0')
+env = gym.make('CartPole-v0')
 obs_shape = env.observation_space.shape
-n_acts = env.action_space.shape[0]
+n_acts = env.action_space.n
 
 epochs = 100
-batch_size = 5000
 opt = tf.optimizers.Adam(learning_rate=1e-2)
 γ = .99
 λ = 0.97
@@ -30,21 +26,20 @@ value_model = tf.keras.models.Sequential([
 value_model.compile('adam', loss='MSE')
 value_model.summary()
 
-#@tf.function
 def discount_cumsum(discount_factor, xs):
     # discounts = [1, discount_factor, discount_factor**2, ...]
     discounts = tf.math.cumprod(tf.fill(xs.shape, discount_factor), exclusive=True)
     return tf.math.cumsum(discounts * xs, reverse=True)
 
 class Buffer(object):
-    def __init__(self, obs_shape, n_acts, size, gam=0.99, lam=0.97):
+    def __init__(self, obs_shape, n_acts, size=5000, gam=0.99, lam=0.97):
         self.ptr = 0
         self.last_idx = 0
         self.size = size
         self.n_acts = n_acts
 
         self.obs_buf = tf.TensorArray(tf.float32, size)
-        self.act_buf = tf.TensorArray(tf.float32, size)
+        self.act_buf = tf.TensorArray(tf.int64, size)
         self.rew_buf = tf.TensorArray(tf.float32, size)
 
         self.rets = []
@@ -69,13 +64,13 @@ class Buffer(object):
         self.lens.append(self.ptr - self.last_idx)
         self.rets.append(tf.reduce_sum(self.rew_buf.gather(current_episode)) + last_val)
 
-        self.V_hats = self.V_hats.scatter(current_episode, discount_cumsum(self.gam, self.rew_buf.gather(current_episode)))
+        self.V_hats.scatter(current_episode, discount_cumsum(self.gam, self.rew_buf.gather(current_episode)))
 
         Vs = tf.squeeze(value_model(self.obs_buf.gather(current_episode)), axis=1)
         Vsp1 = tf.concat([Vs[1:], [last_val]], axis=0)
         deltas = self.rew_buf.gather(current_episode) + self.gam * Vsp1 - Vs
 
-        self.gae = self.gae.scatter(current_episode, discount_cumsum(self.gam * self.lam, deltas))
+        self.gae.scatter(current_episode, discount_cumsum(self.gam * self.lam, deltas))
 
         self.last_idx = self.ptr
         if self.ptr==self.size:
@@ -89,14 +84,15 @@ class Buffer(object):
     #@tf.function
     def loss(self):
         logits = model.apply(self.obs_buf)
-        action_masks = self.act_buf
+        action_masks = tf.one_hot(self.act_buf, n_acts)
         log_probs = tf.reduce_sum(action_masks * tf.nn.log_softmax(logits),
                                   axis=1)
         return -tf.reduce_mean(self.gae * log_probs)
 
-#@tf.function
+@tf.function
 def action(obs):
-    return tf.squeeze(model(tf.expand_dims(obs, 0)), axis=0)
+    return tf.squeeze(tf.random.categorical(logits=model.apply(tf.reshape(obs, (1, -1))), num_samples=1),
+                      axis=(0, 1))
 
 def run_one_episode(buf):
     obs = env.reset()
@@ -119,7 +115,7 @@ def run_one_episode(buf):
 
 def train_one_epoch():
 
-    batch = Buffer(obs_shape, n_acts, batch_size, gam=γ, lam=λ)
+    batch = Buffer(obs_shape, n_acts, gam=γ, lam=λ)
 
     while batch.ptr < batch.size:
         run_one_episode(batch)
@@ -130,27 +126,15 @@ def train_one_epoch():
     #                                               batch.V_hats.shape))
     value_model.fit(batch.obs_buf.numpy(), batch.V_hats.numpy())
 
-    
-
     return batch.loss(), batch.rets, batch.lens
 
-first_start_time = time.time()
-
 #training loop
-for i in range(1, epochs+1):
+for i in range(epochs):
     start_time = time.time()
     batch_loss, batch_rets, batch_lens = train_one_epoch()
-    now = time.time()
-
-    logger.logkv("misc/nupdates", i)
-    logger.logkv("misc/total_timesteps", i*batch_size)
-    logger.logkv("fps", int(batch_size/(now - start_time)))
-    logger.logkv("eprewmean", tf.reduce_mean(batch_rets).numpy())
-    logger.logkv("eplenmean", tf.reduce_mean(batch_lens).numpy())
-    logger.logkv("elapsed_time", now - first_start_time)
-    logger.logkv("loss/", batch_loss.numpy())
-
-    logger.dumpkvs()
-
-env.action_space
-
+    duration = time.time() - start_time
+    print('epoch: %3d \t loss: %.3f \t return: %.3f \t ep_len: %.3f \t time: %.3f' %
+          (i, batch_loss.numpy(),
+           sum(batch_rets)/len(batch_rets),
+           sum(batch_lens)/len(batch_lens),
+          duration))
