@@ -1,10 +1,16 @@
 import tensorflow as tf
 import gym
 import pybullet_envs
-
+import sys
+sys.path.insert(0, '~/PycharmProjects/RLExp/algos')
+import utils.logx
+from utils.logx import EpochLogger
 import time
 
 from baselines import logger
+
+logger = EpochLogger(output_dir="./model")
+logger.save_config(locals())
 
 env = gym.make('Walker2DBulletEnv-v0')
 #env.render(mode = 'human')
@@ -13,6 +19,7 @@ n_acts = env.action_space.shape[0]
 
 epochs = 100
 batch_size = 5000
+save_freq = 10
 opt = tf.optimizers.Adam(learning_rate=1e-2)
 γ = .99
 λ = 0.97
@@ -67,10 +74,18 @@ class Buffer(object):
     #@tf.function
     def finish_path(self, last_val=0):
         current_episode = range(self.last_idx, self.ptr)
-        self.lens.append(self.ptr - self.last_idx)
-        self.rets.append(tf.reduce_sum(self.rew_buf.gather(current_episode)) + last_val)
 
-        self.V_hats = self.V_hats.scatter(current_episode, discount_cumsum(self.gam, self.rew_buf.gather(current_episode)))
+        len = self.ptr - self.last_idx
+        ret = tf.reduce_sum(self.rew_buf.gather(current_episode)) + last_val
+        v_hats = discount_cumsum(self.gam, self.rew_buf.gather(current_episode))
+
+        logger.store(EpRet=ret)
+        logger.store(EpLen=len)
+        logger.store(VVals=v_hats.numpy())
+
+        self.lens.append(len)
+        self.rets.append(ret)
+        self.V_hats = self.V_hats.scatter(current_episode, v_hats)
 
         Vs = tf.squeeze(value_model(self.obs_buf.gather(current_episode)), axis=1)
         Vsp1 = tf.concat([Vs[1:], [last_val]], axis=0)
@@ -129,11 +144,10 @@ def train_one_epoch():
 
     #print('batch_obs: {}, batch_V_hats: {}'.format(batch.obs.shape,
     #                                               batch.V_hats.shape))
-    value_model.fit(batch.obs_buf.numpy(), batch.V_hats.numpy())
+    hist = value_model.fit(batch.obs_buf.numpy(), batch.V_hats.numpy())
+    logger.log_tabular('LossV', hist.history['loss'].numpy(), average_only=True)
 
-    
-
-    return batch.loss(), batch.rets, batch.lens
+    return batch.loss()
 
 first_start_time = time.time()
 
@@ -145,19 +159,42 @@ def save_model():
 
 #training loop
 for i in range(1, epochs+1):
+
+    if (i % save_freq == 0) or (i == epochs - 1):
+        logger.save_state({'env': env}, None)
+
     start_time = time.time()
-    batch_loss, batch_rets, batch_lens = train_one_epoch()
+    batch_loss = train_one_epoch()
     now = time.time()
 
-    logger.logkv("misc/nupdates", i)
-    logger.logkv("misc/total_timesteps", i*batch_size)
-    logger.logkv("fps", int(batch_size/(now - start_time)))
-    logger.logkv("eprewmean", tf.reduce_mean(batch_rets).numpy())
-    logger.logkv("eplenmean", tf.reduce_mean(batch_lens).numpy())
-    logger.logkv("elapsed_time", now - first_start_time)
-    logger.logkv("loss/", batch_loss.numpy())
+    logger.log_tabular('Epoch', i)
 
-    logger.dumpkvs()
+    logger.log_tabular('EpRet', with_min_and_max=True)
+    logger.log_tabular('EpLen', average_only=True)
+    logger.log_tabular('VVals', with_min_and_max=True)
 
-save_model()
+    logger.log_tabular('TotalEnvInteracts', i*batch_size)
+    logger.log_tabular('LossPi', batch_loss, average_only=True)
+    logger.log_tabular('Time', now - first_start_time)
+    logger.dump_tabular()
+
+    #logger.log_tabular('DeltaLossPi', average_only=True)
+    #logger.log_tabular('DeltaLossV', average_only=True)
+    #logger.log_tabular('Entropy', average_only=True)
+    #logger.log_tabular('KL', average_only=True)
+    #logger.log_tabular('ClipFrac', average_only=True)
+    #logger.log_tabular('StopIter', average_only=True)
+
+
+#    logger.logkv("misc/nupdates", i)
+#    logger.logkv("misc/total_timesteps", i*batch_size)
+#    logger.logkv("fps", int(batch_size/(now - start_time)))
+#    logger.logkv("eprewmean", tf.reduce_mean(batch_rets).numpy())
+#    logger.logkv("eplenmean", tf.reduce_mean(batch_lens).numpy())
+#    logger.logkv("elapsed_time", now - first_start_time)
+#    logger.logkv("loss/", batch_loss.numpy())
+
+#    logger.dumpkvs()
+
+#save_model()
 
