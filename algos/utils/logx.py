@@ -12,7 +12,8 @@ import numpy as np
 import tensorflow as tf
 import os.path as osp, time, atexit, os
 import sys
-sys.path.insert(0, '~/PycharmProjects/RLExp/algos')
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__),"..")))
+import utils.logx
 from utils.mpi_tools import proc_id, mpi_statistics_scalar
 from utils.serialization_utils import convert_json
 

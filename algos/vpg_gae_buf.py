@@ -1,18 +1,18 @@
 import tensorflow as tf
 import gym
 import pybullet_envs
+import time
+import os
 import sys
-sys.path.insert(0, '~/PycharmProjects/RLExp/algos')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import utils.logx
 from utils.logx import EpochLogger
-import time
-
-from baselines import logger
 
 logger = EpochLogger(output_dir="./model")
 logger.save_config(locals())
 
-env = gym.make('Walker2DBulletEnv-v0')
+env = gym.make('Pendulum-v0')
+print(env.action_space)
 #env.render(mode = 'human')
 obs_shape = env.observation_space.shape
 n_acts = env.action_space.shape[0]
@@ -145,7 +145,7 @@ def train_one_epoch():
     #print('batch_obs: {}, batch_V_hats: {}'.format(batch.obs.shape,
     #                                               batch.V_hats.shape))
     hist = value_model.fit(batch.obs_buf.numpy(), batch.V_hats.numpy())
-    logger.log_tabular('LossV', hist.history['loss'].numpy(), average_only=True)
+    logger.log_tabular('LossV', hist.history['loss'], average_only=True)
 
     return batch.loss()
 
