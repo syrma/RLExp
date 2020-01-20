@@ -8,8 +8,11 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import utils.logx
 from utils.logx import EpochLogger
+import argparse
 
-logger = EpochLogger(output_dir="./model/ppo/ppo2", exp_name='ppo3')
+parser = argparse.ArgumentParser(description='train ppo')
+parser.add_argument('')
+logger = EpochLogger(output_dir="./model/ppo/ppo3", exp_name='ppo')
 logger.save_config(locals())
 save_freq = 10
 
