@@ -11,10 +11,18 @@ from utils.logx import EpochLogger
 import argparse
 
 parser = argparse.ArgumentParser(description='train ppo')
-parser.add_argument('')
-logger = EpochLogger(output_dir="./model/ppo/ppo3", exp_name='ppo')
-logger.save_config(locals())
+parser.add_argument('--output_dir',  help='output directory')
+parser.add_argument('--exp_name', help='experiment name')
+args = parser.parse_args()
+print(args.output_dir, args.exp_name)
+output_dir = args.output_dir
+exp_name = args.exp_name
+
+logger = EpochLogger(output_dir=output_dir, exp_name=exp_name)
+#logger.save_config(locals())
 save_freq = 10
+
+
 
 env = gym.make('Pendulum-v0')
 obs_shape = env.observation_space.shape
