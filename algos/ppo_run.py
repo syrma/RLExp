@@ -4,11 +4,6 @@ import argparse
 def plot():
     os.system('python plot.py model/ppo')
 
-def train(seeds_list = [0]):
-    for i in range(10):
-        cmd = 'python ppo_gae_buf.py --output_dir model/ppo/ppo'+ str(i)+ ' --exp_name ppo'
-        os.system(cmd)
-
 def test():
     print('test')
     #TODO: load model, show the agent in the environment
@@ -23,7 +18,13 @@ cmd = args.cmd
 if cmd=='plot':
     plot()
 elif cmd=='train':
-    train()
+    for i in range(10):
+        try:
+            cmd = 'python ppo_gae_buf.py --output_dir model/ppo/ppo' + str(i) + ' --exp_name ppo'
+            os.system(cmd)
+        except:
+            print('except')
+            break
 elif cmd=='test':
     test()
 else:
