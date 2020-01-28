@@ -8,6 +8,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from utils.logx import EpochLogger
 import argparse
+import pybullet_envs
 
 parser = argparse.ArgumentParser(description='train ppo')
 parser.add_argument('--output_dir',  help='output directory')
@@ -19,20 +20,19 @@ exp_name = args.exp_name
 logger = EpochLogger(output_dir=output_dir, exp_name=exp_name)
 save_freq = 10
 
-env = gym.make('Pendulum-v0')
+env = gym.make('AntBulletEnv-v0')
 obs_shape = env.observation_space.shape
 n_acts = env.action_space.shape[0]
 
 batch_size = 5000
 epochs = 100
 opt = tf.optimizers.Adam(learning_rate=1e-2)
-γ = [0.99, 0.99]
-λ = [0.97, 0.99]
+γ = .99
+λ = 0.97
 eps = 0.1
 
-config={'output_dir':output_dir, 'exp_name':exp_name, 'epochs': epochs, 'batch_size':batch_size, 'lambda':λ, 'gamma':γ, 'save_freq':save_freq, 'variant': "gc average", 'logger': logger}
+config={'output_dir':output_dir, 'exp_name':exp_name, 'epochs': epochs, 'batch_size':batch_size, 'lambda':λ, 'gamma':γ, 'save_freq':save_freq, 'variant': 'vppo', 'logger': logger}
 logger.save_config(config)
-
 #policy/actor model
 model = tf.keras.models.Sequential([
     tf.keras.layers.Dense(32, activation='tanh', input_shape=obs_shape),
@@ -71,8 +71,7 @@ class Buffer(object):
         self.lens = []
 
         self.V_hats = tf.TensorArray(tf.float32, size)
-        self.n_gae = 2
-        self.gae = [tf.TensorArray(tf.float32, size) for _ in range(self.n_gae)]
+        self.gae = tf.TensorArray(tf.float32, size)
 
         self.gam = gam
         self.lam = lam
@@ -104,7 +103,7 @@ class Buffer(object):
         Vs = tf.squeeze(value_model.apply(self.obs_buf.gather(current_episode)), axis=1)
         Vsp1 = tf.concat([Vs[1:], [last_val]], axis=0)
         deltas = self.rew_buf.gather(current_episode) + self.gam * Vsp1 - Vs
-        self.gae[i] = self.gae[i].scatter(current_episode, discount_cumsum(self.gam[i] * self.lam[i], deltas))
+        self.gae = self.gae.scatter(current_episode, discount_cumsum(self.gam * self.lam, deltas))
 
         self.last_idx = self.ptr
 
@@ -120,9 +119,7 @@ class Buffer(object):
     #@tf.function
     def loss(self, minibatch_start, minibatch_size):
         minibatch = slice(minibatch_start, minibatch_start + minibatch_size)
-        obs, act, adv, logprob = self.obs_buf[minibatch], self.act_buf[minibatch], self.prob_buf[minibatch]
-
-        adv = (self.gae[0][minibatch] + self.gae[1][minibatch]) / 2
+        obs, act, adv, logprob = self.obs_buf[minibatch], self.act_buf[minibatch], self.gae[minibatch], self.prob_buf[minibatch]
         minibatch_size = len(adv)
 
         #logits = model(obs)
@@ -218,4 +215,3 @@ for i in range(epochs):
     logger.log_tabular('LossPi', average_only=True)
     logger.log_tabular('Time', now - first_start_time)
     logger.dump_tabular()
-

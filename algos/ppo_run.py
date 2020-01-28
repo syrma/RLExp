@@ -20,7 +20,7 @@ if cmd=='plot':
 elif cmd=='train':
     for i in range(10):
         try:
-            cmd = 'python ppo_gae_buf.py --output_dir model/ppo/ppo' + str(i) + ' --exp_name ppo'
+            cmd = 'python vppo_gae_buf.py --output_dir model/vppo_walker/ppo' + str(i) + ' --exp_name vppo_walker'
             os.system(cmd)
         except:
             print('except')
