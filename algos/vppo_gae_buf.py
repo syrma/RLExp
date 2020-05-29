@@ -3,24 +3,19 @@ import gym
 import pybullet_envs
 import time
 import math
-import os
-import sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from utils.logx import EpochLogger
 import argparse
-import pybullet_envs
+import wandb
+import mujoco_py
+
 
 parser = argparse.ArgumentParser(description='train ppo')
-parser.add_argument('--output_dir',  help='output directory')
-parser.add_argument('--exp_name', help='experiment name')
+parser.add_argument('--env_name', help='environment name')
 args = parser.parse_args()
-output_dir = args.output_dir
-exp_name = args.exp_name
+env_name = args.env_name
 
-logger = EpochLogger(output_dir=output_dir, exp_name=exp_name)
-save_freq = 10
+wandb.init(project='ppo_gae_buf')
 
-env = gym.make('AntBulletEnv-v0')
+env = gym.make(env_name)
 obs_shape = env.observation_space.shape
 n_acts = env.action_space.shape[0]
 
@@ -31,8 +26,13 @@ opt = tf.optimizers.Adam(learning_rate=1e-2)
 λ = 0.97
 eps = 0.1
 
-config={'output_dir':output_dir, 'exp_name':exp_name, 'epochs': epochs, 'batch_size':batch_size, 'lambda':λ, 'gamma':γ, 'save_freq':save_freq, 'variant': 'vppo', 'logger': logger}
-logger.save_config(config)
+#config saving
+wandb.config.env = env_name
+wandb.config.epochs = epochs
+wandb.config.batch_size = batch_size
+wandb.config.lam = λ
+wandb.config.gamma = γ
+
 #policy/actor model
 model = tf.keras.models.Sequential([
     tf.keras.layers.Dense(32, activation='tanh', input_shape=obs_shape),
@@ -92,15 +92,13 @@ class Buffer(object):
         ret = tf.reduce_sum(self.rew_buf.gather(current_episode)) + last_val
         v_hats = discount_cumsum(self.gam, self.rew_buf.gather(current_episode))
 
-        logger.store(EpRet=ret)
-        logger.store(EpLen=len)
-        logger.store(VVals=v_hats.numpy())
+        wandb.log({'EpRet':ret, 'EpLen':len,'VVals':v_hats.numpy()})
 
         self.lens.append(len)
         self.rets.append(ret)
         self.V_hats = self.V_hats.scatter(current_episode, v_hats)
 
-        Vs = tf.squeeze(value_model.apply(self.obs_buf.gather(current_episode)), axis=1)
+        Vs = tf.squeeze(value_model(self.obs_buf.gather(current_episode)), axis=1)
         Vsp1 = tf.concat([Vs[1:], [last_val]], axis=0)
         deltas = self.rew_buf.gather(current_episode) + self.gam * Vsp1 - Vs
         self.gae = self.gae.scatter(current_episode, discount_cumsum(self.gam * self.lam, deltas))
@@ -130,7 +128,6 @@ class Buffer(object):
         
         mu = model(obs)
         new_logprob = gaussian_likelihood(act, mu, log_std)
-
 
         mask = tf.cast(adv >= 0, tf.float32)
         epsilon_clip = mask * (1 + eps) + (1 - mask) * (1 - eps)
@@ -182,7 +179,7 @@ def train_one_epoch():
     minibatch_size = 32
     for minibatch_start in range(0, batch.size, minibatch_size):
         opt.minimize(lambda: batch.loss(minibatch_start, minibatch_size), var_list=model.trainable_weights + [log_std])
-        logger.store(LossPi=batch.loss(minibatch_start, minibatch_size))
+        wandb.log({'LossPi':batch.loss(minibatch_start, minibatch_size)})
     
     train_time = time.time() - train_start_time
     run_time = train_start_time - start_time
@@ -190,28 +187,16 @@ def train_one_epoch():
     print('run', run_time, 'train', train_time)
 
     hist = value_model.fit(batch.obs_buf.numpy(), batch.V_hats.numpy(), batch_size=minibatch_size)
-    logger.log_tabular('LossV', hist.history['loss'], average_only=True)
+    wandb.log({'LossV':hist.history['loss']})
 
     return batch.rets, batch.lens
 
 first_start_time = time.time()
 #training loop
 for i in range(epochs):
-    if (i % save_freq == 0) or (i == epochs - 1):
-        logger.save_state({'env': env}, None)
-
     start_time = time.time()
     batch_rets, batch_lens = train_one_epoch()
     duration = time.time() - start_time
     now = time.time()
 
-    logger.log_tabular('Epoch', i)
-
-    logger.log_tabular('EpRet', with_min_and_max=True)
-    logger.log_tabular('EpLen', average_only=True)
-    logger.log_tabular('VVals', with_min_and_max=True)
-
-    logger.log_tabular('TotalEnvInteracts', i * batch_size)
-    logger.log_tabular('LossPi', average_only=True)
-    logger.log_tabular('Time', now - first_start_time)
-    logger.dump_tabular()
+    wandb.log({'Epoch': i, 'TotalEnvInteracts': i * batch_size, 'Time': now - first_start_time})

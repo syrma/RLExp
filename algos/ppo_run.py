@@ -2,9 +2,16 @@ import os
 import argparse
 
 def plot():
+    '''
+    Displays the plot showing the learning process in terms of performance.
+    Creteria for performance needs to be specified to the logger at training time.
+    '''
     os.system('python plot.py model/ppo')
 
 def test():
+    '''
+    Loads a saved model and shows it performing in the environment.
+    '''
     print('test')
     #TODO: load model, show the agent in the environment
 
@@ -13,6 +20,7 @@ def test():
 parser = argparse.ArgumentParser(description='Helper to train, plot or visualize models.')
 parser.add_argument("--cmd", default='train', help='a string for the action (plot, train, test)')
 #parser.add_argument("--seeds", nargs='*', )
+#parser.add_argument("--expnum", default=10, help='number of experiments')
 args = parser.parse_args()
 cmd = args.cmd
 if cmd=='plot':

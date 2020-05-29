@@ -104,7 +104,7 @@ class Buffer(object):
 
     #@tf.function
     def loss(self):
-        logits = model.apply(self.obs_buf)
+        logits = model(self.obs_buf)
         action_masks = self.act_buf
         log_probs = tf.reduce_sum(action_masks * tf.nn.log_softmax(logits),
                                   axis=1)
