@@ -35,7 +35,8 @@ wandb.config.gamma = γ
 
 #policy/actor model
 model = tf.keras.models.Sequential([
-    tf.keras.layers.Dense(32, activation='tanh', input_shape=obs_shape),
+    tf.keras.layers.Dense(64, activation='tanh', input_shape=obs_shape),
+    tf.keras.layers.Dense(64, activation='tanh'),
     tf.keras.layers.Dense(env.action_space.shape[0])
 ])
 model.summary()
@@ -43,7 +44,8 @@ log_std = tf.Variable(tf.fill(env.action_space.shape, -0.5))
 
 #value/critic model
 value_model = tf.keras.models.Sequential([
-    tf.keras.layers.Dense(32, activation='tanh', input_shape=obs_shape),
+    tf.keras.layers.Dense(64, activation='tanh', input_shape=obs_shape),
+    tf.keras.layers.Dense(64, activation='tanh'),
     tf.keras.layers.Dense(1)
 ])
 value_model.compile('adam', loss='MSE')
