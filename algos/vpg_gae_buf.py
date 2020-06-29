@@ -3,6 +3,7 @@ import gym
 import pybullet_envs
 import time
 import wandb
+import math
 
 env_name = 'Pendulum-v0'
 
@@ -27,13 +28,17 @@ wandb.config.gamma = γ
 
 # construct the model
 model = tf.keras.models.Sequential([
-    tf.keras.layers.Dense(32, activation='tanh', input_shape=obs_spc.shape),
+    tf.keras.layers.Dense(64, activation='tanh', input_shape=obs_spc.shape),
+    tf.keras.layers.Dense(64, activation='tanh'),
     tf.keras.layers.Dense(act_spc.shape[0] if act_spc.shape else act_spc.n)
 ])
+if act_spc.shape:
+    log_std = tf.Variable(tf.zeros(act_spc.shape))
 model.summary()
 
 value_model = tf.keras.models.Sequential([
     tf.keras.layers.Dense(32, activation='tanh', input_shape=obs_spc.shape),
+    tf.keras.layers.Dense(64, activation='tanh'),
     tf.keras.layers.Dense(1)
 ])
 value_model.compile('adam', loss='MSE')
@@ -100,25 +105,33 @@ class Buffer(object):
 
     #@tf.function
     def loss(self):
-        logits = model(self.obs_buf)
-
         if env.action_space.shape: # Box
             # FIXME
-            pass
+            # π = N(μ, σ) avec μ=model(obs), σ
+            #log(1/(sigma*sqrt(2*pi))*exp(-1/2*(act - mu)**2/sigma**2))
+            #-log(sigma) -1/2 * log(2*pi) - 1/2 * (act - mu)**2 / sigma**2
+
+            mu = model(self.obs_buf)
+
+            log_probs = -1/2 * (self.act_buf - mu)**2 / tf.exp(log_std)**2 - log_std - tf.math.log(2*math.pi)/2
+
         else: # Discrete
-            action_masks = tf.one_hot(self.act_buf, act_spc.n)
-            log_probs = tf.reduce_sum(action_masks * tf.nn.log_softmax(logits), axis=1)
+            logits = model(self.obs_buf)
+            action_masks = tf.one_hot(self.act_buf, act_spc.n, True, False)
+            log_probs = tf.boolean_mask(tf.nn.log_softmax(logits), action_masks)
 
         return -tf.reduce_mean(self.gae * log_probs)
 
 #@tf.function
 def action(obs):
-    logits = model(tf.expand_dims(obs, 0))
 
     if env.action_space.shape: # Box
         # FIXME
+        mu = tf.squeeze(model(tf.expand_dims(obs, 0)), axis=0)
+        return tf.random.normal((), mu, tf.exp(log_std))
         pass
     else: # Discrete
+        logits = model(tf.expand_dims(obs, 0))
         return tf.squeeze(tf.random.categorical(logits, num_samples=1), axis=(0,1))
 
 def run_one_episode(buf):
@@ -147,13 +160,18 @@ def train_one_epoch():
     while batch.ptr < batch.size:
         run_one_episode(batch)
 
-    opt.minimize(batch.loss, var_list=model.trainable_weights)
+    var_list = list(model.trainable_weights)
+    if act_spc.shape:
+        var_list.append(log_std)
+
+    opt.minimize(batch.loss, var_list=var_list)
 
     #print('batch_obs: {}, batch_V_hats: {}'.format(batch.obs.shape,
     #                                               batch.V_hats.shape))
     hist = value_model.fit(batch.obs_buf.numpy(), batch.V_hats.numpy())
     wandb.log({'LossV': tf.reduce_mean(hist.history['loss']).numpy(),
                'EpRet': wandb.Histogram(batch.rets),
+               'AvgEpRet': tf.reduce_mean(batch.rets),
                'EpLen': tf.reduce_mean(batch.lens),
                'VVals': wandb.Histogram(batch.V_hats)},
               commit=False)
@@ -181,4 +199,3 @@ for i in range(1, epochs+1):
                'Time': now - first_start_time})
 
 #save_model()
-
