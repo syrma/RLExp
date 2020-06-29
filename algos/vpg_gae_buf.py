@@ -37,7 +37,7 @@ if act_spc.shape:
 model.summary()
 
 value_model = tf.keras.models.Sequential([
-    tf.keras.layers.Dense(32, activation='tanh', input_shape=obs_spc.shape),
+    tf.keras.layers.Dense(64, activation='tanh', input_shape=obs_spc.shape),
     tf.keras.layers.Dense(64, activation='tanh'),
     tf.keras.layers.Dense(1)
 ])
