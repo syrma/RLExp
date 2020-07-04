@@ -44,7 +44,7 @@ value_model = tf.keras.models.Sequential([
 value_model.compile('adam', loss='MSE')
 value_model.summary()
 
-#@tf.function
+@tf.function
 def discount_cumsum(discount_factor, xs):
     # discounts = [1, discount_factor, discount_factor**2, ...]
     discounts = tf.math.cumprod(tf.fill(xs.shape, discount_factor), exclusive=True)
@@ -55,6 +55,7 @@ class Buffer(object):
         self.ptr = 0
         self.last_idx = 0
         self.size = size
+        self.continuous = bool(act_spc.shape)
 
         self.obs_buf = tf.TensorArray(obs_spc.dtype, size)
         self.act_buf = tf.TensorArray(act_spc.dtype, size)
@@ -69,7 +70,6 @@ class Buffer(object):
         self.gam = gam
         self.lam = lam
 
-    #@tf.function
     def store(self, obs, act, rew):
         self.obs_buf = self.obs_buf.write(self.ptr, obs)
         self.act_buf = self.act_buf.write(self.ptr, act)
@@ -105,8 +105,7 @@ class Buffer(object):
 
     #@tf.function
     def loss(self):
-        if env.action_space.shape: # Box
-            # FIXME
+        if self.continuous: # Box
             # π = N(μ, σ) avec μ=model(obs), σ
             #log(1/(sigma*sqrt(2*pi))*exp(-1/2*(act - mu)**2/sigma**2))
             #-log(sigma) -1/2 * log(2*pi) - 1/2 * (act - mu)**2 / sigma**2
@@ -124,9 +123,7 @@ class Buffer(object):
 
 #@tf.function
 def action(obs):
-
-    if env.action_space.shape: # Box
-        # FIXME
+    if act_spc.shape: # Box
         mu = tf.squeeze(model(tf.expand_dims(obs, 0)), axis=0)
         return tf.random.normal((), mu, tf.exp(log_std))
         pass
@@ -136,6 +133,7 @@ def action(obs):
 
 def run_one_episode(buf):
     obs = env.reset()
+    obs = tf.cast(obs, obs_spc.dtype)
     done = False
 
     for i in range(buf.ptr, buf.size):
@@ -144,6 +142,7 @@ def run_one_episode(buf):
 
         buf.store(obs, act, rew)
         obs = new_obs
+        obs = tf.cast(obs, obs_spc.dtype)
 
         if done:
             break
