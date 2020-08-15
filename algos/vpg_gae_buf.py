@@ -1,11 +1,14 @@
 import tensorflow as tf
+import tensorflow_probability as tfp
+tfd = tfp.distributions
+
 import gym
 import pybullet_envs
 import time
 import wandb
 import math
 
-env_name = 'Pendulum-v0'
+env_name = 'CartPole-v0'
 
 env = gym.make(env_name)
 
@@ -44,10 +47,11 @@ value_model = tf.keras.models.Sequential([
 value_model.compile('adam', loss='MSE')
 value_model.summary()
 
-@tf.function
-def discount_cumsum(discount_factor, xs):
+@tf.function(experimental_relax_shapes=True)
+def discount_cumsum(discount_factor, xs, length):
+    #print(type(discount_factor), type(xs), xs.shape)
     # discounts = [1, discount_factor, discount_factor**2, ...]
-    discounts = tf.math.cumprod(tf.fill(xs.shape, discount_factor), exclusive=True)
+    discounts = tf.math.cumprod(tf.fill(length, discount_factor), exclusive=True)
     return tf.math.cumsum(discounts * xs, reverse=True)
 
 class Buffer(object):
@@ -80,11 +84,12 @@ class Buffer(object):
     def finish_path(self, last_val=0):
         current_episode = range(self.last_idx, self.ptr)
 
-        len = self.ptr - self.last_idx
+        length = self.ptr - self.last_idx
         ret = tf.reduce_sum(self.rew_buf.gather(current_episode)) + last_val
-        v_hats = discount_cumsum(self.gam, self.rew_buf.gather(current_episode))
+        ep_rew = self.rew_buf.gather(current_episode)
+        v_hats = discount_cumsum(self.gam, ep_rew, tf.constant([length]))
 
-        self.lens.append(len)
+        self.lens.append(length)
         self.rets.append(ret)
         self.V_hats = self.V_hats.scatter(current_episode, v_hats)
 
@@ -92,7 +97,7 @@ class Buffer(object):
         Vsp1 = tf.concat([Vs[1:], [last_val]], axis=0)
         deltas = self.rew_buf.gather(current_episode) + self.gam * Vsp1 - Vs
 
-        self.gae = self.gae.scatter(current_episode, discount_cumsum(self.gam * self.lam, deltas))
+        self.gae = self.gae.scatter(current_episode, discount_cumsum(self.gam * self.lam, deltas, tf.constant([length])))
 
         self.last_idx = self.ptr
         if self.ptr==self.size:
@@ -106,30 +111,26 @@ class Buffer(object):
     #@tf.function
     def loss(self):
         if self.continuous: # Box
-            # π = N(μ, σ) avec μ=model(obs), σ
-            #log(1/(sigma*sqrt(2*pi))*exp(-1/2*(act - mu)**2/sigma**2))
-            #-log(sigma) -1/2 * log(2*pi) - 1/2 * (act - mu)**2 / sigma**2
+            # π = N(μ, σ) with μ=model(obs), σ
 
-            mu = model(self.obs_buf)
-
-            log_probs = -1/2 * (self.act_buf - mu)**2 / tf.exp(log_std)**2 - log_std - tf.math.log(2*math.pi)/2
+            dist = tfd.Normal(model(self.obs_buf), tf.exp(log_std))
 
         else: # Discrete
-            logits = model(self.obs_buf)
-            action_masks = tf.one_hot(self.act_buf, act_spc.n, True, False)
-            log_probs = tf.boolean_mask(tf.nn.log_softmax(logits), action_masks)
+            dist = tfd.Categorical(logits = model(self.obs_buf))
 
+        log_probs = dist.log_prob(self.act_buf)
         return -tf.reduce_mean(self.gae * log_probs)
 
 #@tf.function
 def action(obs):
     if act_spc.shape: # Box
         mu = tf.squeeze(model(tf.expand_dims(obs, 0)), axis=0)
-        return tf.random.normal((), mu, tf.exp(log_std))
-        pass
+        dist = tfd.Normal(mu, tf.exp(log_std))
     else: # Discrete
-        logits = model(tf.expand_dims(obs, 0))
-        return tf.squeeze(tf.random.categorical(logits, num_samples=1), axis=(0,1))
+        logits = tf.squeeze(model(tf.expand_dims(obs, 0)), axis=0)
+        dist = tfd.Categorical(logits, dtype=act_spc.dtype)
+
+    return dist.sample()
 
 def run_one_episode(buf):
     obs = env.reset()
@@ -150,7 +151,7 @@ def run_one_episode(buf):
     if done:
         buf.finish_path()
     else:
-        buf.finish_path(tf.squeeze(value_model.apply(obs.reshape(1, -1))))
+        buf.finish_path(tf.squeeze(value_model(tf.expand_dims(obs, 0))))
 
 def train_one_epoch():
 
@@ -174,7 +175,7 @@ def train_one_epoch():
                'EpLen': tf.reduce_mean(batch.lens),
                'VVals': wandb.Histogram(batch.V_hats)},
               commit=False)
-
+    print('AvgEpRet:', tf.reduce_mean(batch.rets).numpy())
     return batch.loss()
 
 first_start_time = time.time()
