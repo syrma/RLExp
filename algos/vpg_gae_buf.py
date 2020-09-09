@@ -8,7 +8,7 @@ import time
 import wandb
 import math
 
-env_name = 'CartPole-v0'
+env_name = 'AntBulletEnv-v0'
 
 env = gym.make(env_name)
 
@@ -116,19 +116,19 @@ class Buffer(object):
             dist = tfd.Normal(model(self.obs_buf), tf.exp(log_std))
 
         else: # Discrete
-            dist = tfd.Categorical(logits = model(self.obs_buf))
+            dist = tfd.Categorical(logits=model(self.obs_buf))
 
         log_probs = dist.log_prob(self.act_buf)
+        #qprint(self.act_buf.shape, self.gae.shape, log_probs.shape)
         return -tf.reduce_mean(self.gae * log_probs)
 
 #@tf.function
 def action(obs):
+    est = tf.squeeze(model(tf.expand_dims(obs, 0)), axis=0)
     if act_spc.shape: # Box
-        mu = tf.squeeze(model(tf.expand_dims(obs, 0)), axis=0)
-        dist = tfd.Normal(mu, tf.exp(log_std))
+        dist = tfd.Normal(est, tf.exp(log_std))
     else: # Discrete
-        logits = tf.squeeze(model(tf.expand_dims(obs, 0)), axis=0)
-        dist = tfd.Categorical(logits, dtype=act_spc.dtype)
+        dist = tfd.Categorical(logits=est, dtype=act_spc.dtype)
 
     return dist.sample()
 

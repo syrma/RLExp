@@ -6,7 +6,8 @@ import math
 import argparse
 import wandb
 import mujoco_py
-
+import tensorflow_probability as tfp
+tfd = tfp.distributions
 
 parser = argparse.ArgumentParser(description='train ppo')
 parser.add_argument('--env_name', help='environment name')
@@ -16,8 +17,9 @@ env_name = args.env_name
 wandb.init(project='ppo_gae_buf')
 
 env = gym.make(env_name)
-obs_shape = env.observation_space.shape
-n_acts = env.action_space.shape[0]
+
+obs_spc = env.observation_space
+act_spc = env.action_space
 
 batch_size = 5000
 epochs = 100
@@ -35,16 +37,17 @@ wandb.config.gamma = γ
 
 #policy/actor model
 model = tf.keras.models.Sequential([
-    tf.keras.layers.Dense(64, activation='tanh', input_shape=obs_shape),
+    tf.keras.layers.Dense(64, activation='tanh', input_shape=obs_spc.shape),
     tf.keras.layers.Dense(64, activation='tanh'),
-    tf.keras.layers.Dense(env.action_space.shape[0])
+    tf.keras.layers.Dense(act_spc.shape[0] if act_spc.shape else act_spc.n)
 ])
 model.summary()
-log_std = tf.Variable(tf.fill(env.action_space.shape, -0.5))
+if act_spc.shape:
+    log_std = tf.Variable(tf.fill(env.action_space.shape, -0.5))
 
 #value/critic model
 value_model = tf.keras.models.Sequential([
-    tf.keras.layers.Dense(64, activation='tanh', input_shape=obs_shape),
+    tf.keras.layers.Dense(64, activation='tanh', input_shape=obs_spc.shape),
     tf.keras.layers.Dense(64, activation='tanh'),
     tf.keras.layers.Dense(1)
 ])
@@ -57,14 +60,14 @@ def discount_cumsum(discount_factor, xs):
     return tf.math.cumsum(discounts * xs, reverse=True)
 
 class Buffer(object):
-    def __init__(self, obs_shape, n_acts, size, gam=0.99, lam=0.97):
+    def __init__(self, obs_spc, act_spc, size, gam=0.99, lam=0.97):
         self.ptr = 0
         self.last_idx = 0
         self.size = size
-        self.n_acts = n_acts
+        self.continuous = bool(act_spc.shape)
 
-        self.obs_buf = tf.TensorArray(tf.float32, size)
-        self.act_buf = tf.TensorArray(tf.float32, size) # a changé. si discret int, si box float
+        self.obs_buf = tf.TensorArray(obs_spc.dtype, size)
+        self.act_buf = tf.TensorArray(act_spc.dtype, size) # a changé. si discret int, si box float
         self.rew_buf = tf.TensorArray(tf.float32, size)
         self.prob_buf = tf.TensorArray(tf.float32,  size)
 
@@ -127,28 +130,35 @@ class Buffer(object):
         # # forall i, newprob[i] = softmax(logits)[i, act[i]]
         # # softmax(logits).shape = (minibatch_size, n_acts)
         #new_prob = tf.gather_nd(tf.nn.softmax(logits), tf.reshape(act, (minibatch_size, 1)), batch_dims=1)
-        
-        mu = model(obs)
-        new_logprob = gaussian_likelihood(act, mu, log_std)
+
+        #new_logprob = gaussian_likelihood(act, mu, log_std)
+        if self.continuous:
+            dist = tfd.Normal(model(obs), tf.exp(log_std))
+        else:
+            dist = tfd.Categorical(logits=model(obs))
+
+        new_logprob = tf.reduce_sum(dist.log_prob(act))
 
         mask = tf.cast(adv >= 0, tf.float32)
         epsilon_clip = mask * (1 + eps) + (1 - mask) * (1 - eps)
-        return -tf.reduce_mean(tf.minimum(tf.exp(new_logprob - logprob) * adv, epsilon_clip * adv))
+        ratio = tf.exp(new_logprob - logprob)
 
-EPS = 1e-8
-def gaussian_likelihood(x, mu, log_std):
-    pre_sum = -0.5 * (((x-mu)/(tf.exp(log_std)+EPS))**2 + 2*log_std + tf.math.log(2*math.pi))
-    return tf.reduce_sum(pre_sum, axis=1)
+        return -tf.reduce_mean(tf.minimum(ratio * adv, epsilon_clip * adv))
+        #return -tf.reduce_mean(adv*logprob)
 
 @tf.function
 def action(obs):
-      mu = model(tf.expand_dims(obs, 0))
-      std = tf.exp(log_std)
-      #action = tf.squeeze(tf.random.categorical(logits, num_samples=1), axis=(0,1))
-      action = mu + tf.random.normal(env.action_space.shape) * std 
-#     prob = tf.nn.softmax(logits)[0,action]
-      prob = gaussian_likelihood(action, mu, log_std)
-      return action, prob
+    est = tf.squeeze(model(tf.expand_dims(obs,0)), axis=0)
+    if act_spc.shape:
+        std = tf.exp(log_std)
+        dist = tfd.Normal(est, std)
+    else:
+        dist = tfd.Categorical(logits=est, dtype=act_spc.dtype)
+
+    action = dist.sample()
+    logprob = tf.reduce_sum(dist.log_prob(action))
+
+    return action, logprob
 
 def run_one_episode(buf):
     obs = env.reset()
@@ -156,8 +166,8 @@ def run_one_episode(buf):
 
     for i in range(buf.ptr, buf.size):
         act, prob = action(obs)
-        new_obs, rew, done, _ = env.step(act[0].numpy())
-        buf.store(obs, act[0], rew, prob)
+        new_obs, rew, done, _ = env.step(act.numpy())
+        buf.store(obs, act, rew, prob)
         obs = new_obs
 
         if done:
@@ -170,23 +180,27 @@ def run_one_episode(buf):
 
 def train_one_epoch():
 
-    batch = Buffer(obs_shape, n_acts, batch_size, gam=γ, lam=λ)
+    batch = Buffer(obs_spc, act_spc, batch_size, gam=γ, lam=λ)
     start_time = time.time()
     
     while batch.ptr < batch.size:
         run_one_episode(batch)
     
     train_start_time = time.time()
-    
+
     minibatch_size = 32
+    var_list = list(model.trainable_weights)
+    if act_spc.shape:
+        var_list.append(log_std)
     for minibatch_start in range(0, batch.size, minibatch_size):
-        opt.minimize(lambda: batch.loss(minibatch_start, minibatch_size), var_list=model.trainable_weights + [log_std])
+        opt.minimize(lambda: batch.loss(minibatch_start, minibatch_size), var_list=var_list)
         wandb.log({'LossPi':batch.loss(minibatch_start, minibatch_size)})
     
     train_time = time.time() - train_start_time
     run_time = train_start_time - start_time
 
     print('run', run_time, 'train', train_time)
+    print('AvgEpRet:', tf.reduce_mean(batch.rets).numpy())
 
     hist = value_model.fit(batch.obs_buf.numpy(), batch.V_hats.numpy(), batch_size=minibatch_size)
     wandb.log({'LossV':hist.history['loss']})
