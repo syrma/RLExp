@@ -49,7 +49,6 @@ value_model.summary()
 
 @tf.function(experimental_relax_shapes=True)
 def discount_cumsum(discount_factor, xs, length):
-    #print(type(discount_factor), type(xs), xs.shape)
     # discounts = [1, discount_factor, discount_factor**2, ...]
     discounts = tf.math.cumprod(tf.fill(length, discount_factor), exclusive=True)
     return tf.math.cumsum(discounts * xs, reverse=True)
@@ -113,20 +112,19 @@ class Buffer(object):
         if self.continuous: # Box
             # π = N(μ, σ) with μ=model(obs), σ
 
-            dist = tfd.Normal(model(self.obs_buf), tf.exp(log_std))
+            dist = tfd.MultivariateNormalDiag(model(self.obs_buf), tf.exp(log_std))
 
         else: # Discrete
             dist = tfd.Categorical(logits=model(self.obs_buf))
 
         log_probs = dist.log_prob(self.act_buf)
-        #qprint(self.act_buf.shape, self.gae.shape, log_probs.shape)
         return -tf.reduce_mean(self.gae * log_probs)
 
 #@tf.function
 def action(obs):
     est = tf.squeeze(model(tf.expand_dims(obs, 0)), axis=0)
     if act_spc.shape: # Box
-        dist = tfd.Normal(est, tf.exp(log_std))
+        dist = tfd.MultivariateNormalDiag(est, tf.exp(log_std))
     else: # Discrete
         dist = tfd.Categorical(logits=est, dtype=act_spc.dtype)
 
@@ -166,8 +164,6 @@ def train_one_epoch():
 
     opt.minimize(batch.loss, var_list=var_list)
 
-    #print('batch_obs: {}, batch_V_hats: {}'.format(batch.obs.shape,
-    #                                               batch.V_hats.shape))
     hist = value_model.fit(batch.obs_buf.numpy(), batch.V_hats.numpy())
     wandb.log({'LossV': tf.reduce_mean(hist.history['loss']).numpy(),
                'EpRet': wandb.Histogram(batch.rets),

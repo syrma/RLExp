@@ -67,7 +67,7 @@ class Buffer(object):
         self.continuous = bool(act_spc.shape)
 
         self.obs_buf = tf.TensorArray(obs_spc.dtype, size)
-        self.act_buf = tf.TensorArray(act_spc.dtype, size) # a changé. si discret int, si box float
+        self.act_buf = tf.TensorArray(act_spc.dtype, size)
         self.rew_buf = tf.TensorArray(tf.float32, size)
         self.prob_buf = tf.TensorArray(tf.float32,  size)
 
@@ -125,33 +125,24 @@ class Buffer(object):
         obs, act, adv, logprob = self.obs_buf[minibatch], self.act_buf[minibatch], self.gae[minibatch], self.prob_buf[minibatch]
         minibatch_size = len(adv)
 
-        #logits = model(obs)
-              
-        # # forall i, newprob[i] = softmax(logits)[i, act[i]]
-        # # softmax(logits).shape = (minibatch_size, n_acts)
-        #new_prob = tf.gather_nd(tf.nn.softmax(logits), tf.reshape(act, (minibatch_size, 1)), batch_dims=1)
-
-        #new_logprob = gaussian_likelihood(act, mu, log_std)
         if self.continuous:
-            dist = tfd.Normal(model(obs), tf.exp(log_std))
+            dist = tfd.MultivariateNormalDiag(model(obs), tf.exp(log_std))
         else:
             dist = tfd.Categorical(logits=model(obs))
 
-        new_logprob = tf.reduce_sum(dist.log_prob(act))
+        new_logprob = dist.log_prob(act)
 
         mask = tf.cast(adv >= 0, tf.float32)
         epsilon_clip = mask * (1 + eps) + (1 - mask) * (1 - eps)
         ratio = tf.exp(new_logprob - logprob)
 
         return -tf.reduce_mean(tf.minimum(ratio * adv, epsilon_clip * adv))
-        #return -tf.reduce_mean(adv*logprob)
 
 @tf.function
 def action(obs):
     est = tf.squeeze(model(tf.expand_dims(obs,0)), axis=0)
     if act_spc.shape:
-        std = tf.exp(log_std)
-        dist = tfd.Normal(est, std)
+        dist = tfd.MultivariateNormalDiag(est, tf.exp(log_std))
     else:
         dist = tfd.Categorical(logits=est, dtype=act_spc.dtype)
 
