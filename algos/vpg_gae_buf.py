@@ -9,12 +9,6 @@ import wandb
 import math
 import argparse
 
-@tf.function(experimental_relax_shapes=True)
-def discount_cumsum(discount_factor, xs, length):
-    # discounts = [1, discount_factor, discount_factor**2, ...]
-    discounts = tf.math.cumprod(tf.fill(length, discount_factor), exclusive=True)
-    return tf.math.cumsum(discounts * xs, reverse=True)
-
 class Buffer(object):
     def __init__(self, obs_spc, act_spc, model, value_model, size, gam=0.99, lam=0.97):
         self.ptr = 0
@@ -51,8 +45,11 @@ class Buffer(object):
 
         length = self.ptr - self.last_idx
         ret = tf.reduce_sum(self.rew_buf.gather(current_episode)) + last_val
+
+        # v_hats = discounted cumulative sum
         ep_rew = self.rew_buf.gather(current_episode)
-        v_hats = discount_cumsum(self.gam, ep_rew, tf.constant([length]))
+        discounts = tf.math.cumprod(tf.fill(ep_rew.shape, self.gam), exclusive=True)
+        v_hats = tf.math.cumsum(discounts * ep_rew, reverse=True)
 
         self.lens.append(length)
         self.rets.append(ret)
@@ -62,7 +59,10 @@ class Buffer(object):
         Vsp1 = tf.concat([Vs[1:], [last_val]], axis=0)
         deltas = self.rew_buf.gather(current_episode) + self.gam * Vsp1 - Vs
 
-        self.gae = self.gae.scatter(current_episode, discount_cumsum(self.gam * self.lam, deltas, tf.constant([length])))
+        # compute the advantage function (gae)
+        discounts = tf.math.cumprod(tf.fill(deltas.shape, self.gam * self.lam), exclusive=True)
+        gae = tf.math.cumsum(discounts * deltas, reverse=True)
+        self.gae = self.gae.scatter(current_episode, gae)
 
         self.last_idx = self.ptr
         if self.ptr==self.size:
@@ -123,15 +123,24 @@ def train_one_epoch(env, batch_size, model, value_model, γ, λ):
     act_spc = env.action_space
 
     batch = Buffer(obs_spc, act_spc, model, value_model, batch_size, gam=γ, lam=λ)
+    start_time = time.time()
 
     while batch.ptr < batch.size:
         run_one_episode(env, batch)
+
+    train_start_time = time.time()
 
     var_list = list(model.trainable_weights)
     if act_spc.shape:
         var_list.append(model.log_std)
 
     opt.minimize(batch.loss, var_list=var_list)
+
+    train_time = time.time() - train_start_time
+    run_time = train_start_time - start_time
+
+    print('run time', run_time, 'train time', train_time)
+    print('AvgEpRet:', tf.reduce_mean(batch.rets).numpy())
 
     hist = value_model.fit(batch.obs_buf.numpy(), batch.V_hats.numpy())
     wandb.log({'LossV': tf.reduce_mean(hist.history['loss']).numpy(),
@@ -140,7 +149,7 @@ def train_one_epoch(env, batch_size, model, value_model, γ, λ):
                'EpLen': tf.reduce_mean(batch.lens),
                'VVals': wandb.Histogram(batch.V_hats)},
               commit=False)
-    print('AvgEpRet:', tf.reduce_mean(batch.rets).numpy())
+
     return batch.loss()
 
 first_start_time = time.time()
@@ -159,6 +168,7 @@ def load_model(model, load_path):
 def train(epochs, env, batch_size, model, value_model, γ, λ):
     for i in range(1, epochs+1):
         start_time = time.time()
+        print('Epoch', i)
         batch_loss = train_one_epoch(env, batch_size, model, value_model, γ, λ)
         now = time.time()
         
@@ -166,17 +176,31 @@ def train(epochs, env, batch_size, model, value_model, γ, λ):
                    'TotalEnvInteracts': i*batch_size,
                    'LossPi': batch_loss,
                    'Time': now - first_start_time})
-        
-    
+
+def test(epochs, env, model):
+    for i in range(1, epochs+1):
+
+        obs, done = env.reset(), False
+        episode_rew = 0
+        while not done:
+            env.render()
+            act = action(model, obs, env.action_space)
+            obs, rew, done, _ = env.step(act.numpy())
+            episode_rew += rew
+        print("Episode reward", episode_rew)
+
 if __name__=="__main__":
 
     parser = argparse.ArgumentParser(description='Train or test VPG')
-    #command_group = parser.add_mutually_exclusive_group()
-    #command_group.add_argument('train', nargs='?' )
-    #command_group.add_argument('test', nargs='?')
-    #parser.add_argument('--model_dir', nargs='?', help='Optional: directory of saved model to test or resume training')
-    parser.add_argument('--env_name', help='environment name')
+    parser.add_argument('test', nargs='?', help = 'Test a saved or a random model')
+    parser.add_argument('--load_dir', help='Optional: directory of saved model to test or resume training')
+    parser.add_argument('--env_name', help='Environment name to use with OpenAI Gym')
+    parser.add_argument('--save_dir', help='Optional: directory where the model should be saved')
+
     args = parser.parse_args()
+
+    save_dir = args.save_dir
+    load_dir = args.load_dir
 
     env = gym.make(args.env_name)
     obs_spc = env.observation_space
@@ -213,5 +237,15 @@ if __name__=="__main__":
     ])
     value_model.compile('adam', loss='MSE')
     value_model.summary()
-    train(epochs, env, batch_size, model, value_model, γ, λ)
-    save_model(model, './model/'+args.env_name)
+
+    if load_dir:
+        load_model(model, load_dir +'/'+ args.env_name)
+
+    if args.test != None:
+        env.render()
+        test(epochs, env, model)
+    else:
+        train(epochs, env, batch_size, model, value_model, γ, λ)
+        if save_dir==None:
+            save_dir = 'model/'
+            save_model(model, save_dir+args.env_name)
