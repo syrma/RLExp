@@ -97,12 +97,12 @@ class Buffer(object):
 
 
 @tf.function
-def action(model, obs, act_spc):
+def action(model, obs, env):
     est = tf.squeeze(model(tf.expand_dims(obs, 0)), axis=0)
-    if act_spc.shape:
+    if env.action_space.shape:
         dist = tfd.MultivariateNormalDiag(est, tf.exp(model.log_std))
     else:
-        dist = tfd.Categorical(logits=est, dtype=act_spc.dtype)
+        dist = tfd.Categorical(logits=est, dtype=env.action_space.dtype)
 
     action = dist.sample()
     logprob = tf.reduce_sum(dist.log_prob(action))
@@ -118,7 +118,7 @@ def run_one_episode(env, buf):
     done = False
 
     for i in range(buf.ptr, buf.size):
-        act, prob = action(buf.model, obs, env.action_space)
+        act, prob = action(buf.model, obs, env)
         new_obs, rew, done, _ = env.step(act.numpy())
 
         buf.store(obs, act, rew, prob)
@@ -201,7 +201,7 @@ def test(epochs, env, model):
         episode_rew = 0
         while not done:
             env.render()
-            act, _ = action(model, obs, env.action_space)
+            act, _ = action(model, obs, env)
             obs, rew, done, _ = env.step(act.numpy())
             episode_rew += rew
         print("Episode reward", episode_rew)
