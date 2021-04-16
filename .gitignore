@@ -1,3 +1,4 @@
 .idea/
 algos/model/
 algos/utils/__pycache__
+algos/wandb/
