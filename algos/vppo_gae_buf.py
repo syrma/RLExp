@@ -172,10 +172,6 @@ def train_one_epoch(env, batch_size, model, value_model, γ, λ):
 
     return batch.rets, batch.lens
 
-
-first_start_time = time.time()
-# training loop
-
 def save_model(model, save_path):
     ckpt = tf.train.Checkpoint(model=model)
     manager = tf.train.CheckpointManager(ckpt, save_path, max_to_keep=None)
@@ -217,6 +213,9 @@ class Parser(argparse.ArgumentParser):
         self.print_help()
         sys.exit(2)
 
+first_start_time = time.time()
+# training loop
+
 if __name__ == '__main__':
 
     parser = Parser(description='Train or test PPO')
@@ -229,7 +228,9 @@ if __name__ == '__main__':
 
     env_name = args.env_name
     if(not env_name):
-        parser.error("No env_name provided.")
+        #parser.error("No env_name provided.")
+        env_name="CartPole-v0"
+
     save_dir = args.save_dir
     load_dir = args.load_dir
 
@@ -270,7 +271,7 @@ if __name__ == '__main__':
     value_model.summary()
 
     if load_dir:
-        load_model(model, load_dir +'/'+ args.env_name)
+        load_model(model, load_dir +'/'+ env_name)
 
     if args.test != None:
         env.render()
@@ -279,4 +280,4 @@ if __name__ == '__main__':
         train(epochs, env, batch_size, model, value_model, γ, λ)
         if save_dir==None:
             save_dir = 'model/'
-            save_model(model, save_dir+args.env_name)
+            save_model(model, save_dir+env_name)

@@ -202,7 +202,8 @@ if __name__=="__main__":
     save_dir = args.save_dir
     load_dir = args.load_dir
 
-    env = gym.make(args.env_name)
+    env_name = args.env_name if args.env_name else 'CartPole-v0'
+    env = gym.make(env_name)
     obs_spc = env.observation_space
     act_spc = env.action_space
 
@@ -212,8 +213,8 @@ if __name__=="__main__":
     γ = .99
     λ = 0.97
     
-    wandb.init('RLExp-algos', entity='rlexp')
-    wandb.config.env = args.env_name
+    wandb.init(project='vpg', entity='rlexp')
+    wandb.config.env = env_name
     wandb.config.algo = 'vpg_gae_buf'
     wandb.config.epochs = epochs
     wandb.config.batch_size = batch_size
@@ -239,7 +240,7 @@ if __name__=="__main__":
     value_model.summary()
 
     if load_dir:
-        load_model(model, load_dir +'/'+ args.env_name)
+        load_model(model, load_dir +'/'+ env_name)
 
     if args.test != None:
         env.render()
@@ -248,4 +249,4 @@ if __name__=="__main__":
         train(epochs, env, batch_size, model, value_model, γ, λ)
         if save_dir==None:
             save_dir = 'model/'
-            save_model(model, save_dir+args.env_name)
+            save_model(model, save_dir+env_name)
