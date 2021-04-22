@@ -6,6 +6,7 @@ import math
 import argparse
 import wandb
 import tensorflow_probability as tfp
+import sys
 tfd = tfp.distributions
 
 class Buffer(object):
@@ -127,10 +128,13 @@ def run_one_episode(env, buf):
         if done:
             break
 
+    critic_start = time.time()
     if done:
         buf.finish_path()
     else:
         buf.finish_path(obs)
+
+    return time.time() - critic_start
 
 
 def train_one_epoch(env, batch_size, model, value_model, γ, λ):
@@ -140,8 +144,9 @@ def train_one_epoch(env, batch_size, model, value_model, γ, λ):
     batch = Buffer(obs_spc, act_spc, model, value_model, batch_size, gam=γ, lam=λ)
     start_time = time.time()
 
+    critic_time = 0
     while batch.ptr < batch.size:
-        run_one_episode(env, batch)
+        critic_time += run_one_episode(env, batch)
 
     train_start_time = time.time()
 
@@ -154,7 +159,7 @@ def train_one_epoch(env, batch_size, model, value_model, γ, λ):
     train_time = time.time() - train_start_time
     run_time = train_start_time - start_time
 
-    print('run time', run_time, 'train time', train_time)
+    print('run time', run_time, 'critic time (included in run time):', critic_time, 'train time', train_time)
     print('AvgEpRet:', tf.reduce_mean(batch.rets).numpy())
 
     hist = value_model.fit(batch.obs_buf.numpy(), batch.V_hats.numpy(), batch_size=32)
@@ -206,9 +211,15 @@ def test(epochs, env, model):
             episode_rew += rew
         print("Episode reward", episode_rew)
 
+class Parser(argparse.ArgumentParser):
+    def error(self, message):
+        sys.stderr.write('error: %s\n' % message)
+        self.print_help()
+        sys.exit(2)
+
 if __name__ == '__main__':
 
-    parser = argparse.ArgumentParser(description='Train or test PPO')
+    parser = Parser(description='Train or test PPO')
     parser.add_argument('test', nargs='?', help = 'Test a saved or a random model')
     parser.add_argument('--load_dir', help='Optional: directory of saved model to test or resume training')
     parser.add_argument('--env_name', help='Environment name to use with OpenAI Gym')
@@ -217,6 +228,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     env_name = args.env_name
+    if(not env_name):
+        parser.error("No env_name provided.")
     save_dir = args.save_dir
     load_dir = args.load_dir
 
