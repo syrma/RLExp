@@ -213,6 +213,7 @@ if __name__ == '__main__':
     parser.add_argument('--load_dir', help='Optional: directory of saved model to test or resume training')
     parser.add_argument('--env_name', help='Environment name to use with OpenAI Gym')
     parser.add_argument('--save_dir', help='Optional: directory where the model should be saved')
+    parser.add_argument('--num_runs', help='Number of runs')
 
     args = parser.parse_args()
 
@@ -222,10 +223,12 @@ if __name__ == '__main__':
         env_name="CartPole-v0"
     save_dir = args.save_dir if args.save_dir else "model/"
     load_dir = args.load_dir
+    num_runs = int(args.num_runs) if args.num_runs else 1
 
-    size = 1000
-    epochs = 100
-    opt = tf.optimizers.Adam(learning_rate=1e-2)
+    size = 5000
+    epochs = 200
+    learning_rate = 1e-2
+    opt = tf.optimizers.Adam(learning_rate)
     γ = .99
     λ = 0.97
     num_env = 5
@@ -236,40 +239,42 @@ if __name__ == '__main__':
     obs_spc = env.observation_space
     act_spc = env.action_space
 
-    wandb.init(project='ppo_vecenv', entity='rlexp')
-    wandb.config.env = env_name
-    wandb.config.epochs = epochs
-    wandb.config.size = size
-    wandb.config.lam = λ
-    wandb.config.gamma = γ
+    for x in range(num_runs):
+        wandb.init(project='ppo', entity='rlexp', reinit=True)
+        wandb.config.env = env_name
+        wandb.config.epochs = epochs
+        wandb.config.size = size
+        wandb.config.lam = λ
+        wandb.config.gamma = γ
 
-    # policy/actor model
-    model = tf.keras.models.Sequential([
-        tf.keras.layers.Dense(64, activation='tanh', input_shape=obs_spc.shape),
-        tf.keras.layers.Dense(64, activation='tanh'),
-        tf.keras.layers.Dense(act_spc.shape[0] if act_spc.shape else act_spc.n)
-    ])
-    if act_spc.shape:
-        model.log_std = tf.Variable(tf.fill(env.action_space.shape, -0.5))
-    model.summary()
+        # policy/actor model
+        model = tf.keras.models.Sequential([
+            tf.keras.layers.Dense(64, activation='tanh', input_shape=obs_spc.shape),
+            tf.keras.layers.Dense(64, activation='tanh'),
+            tf.keras.layers.Dense(act_spc.shape[0] if act_spc.shape else act_spc.n)
+        ])
+        if act_spc.shape:
+            model.log_std = tf.Variable(tf.fill(env.action_space.shape, -0.5))
+        model.summary()
 
-    # value/critic model
-    value_model = tf.keras.models.Sequential([
-        tf.keras.layers.Dense(64, activation='tanh', input_shape=obs_spc.shape),
-        tf.keras.layers.Dense(64, activation='tanh'),
-        tf.keras.layers.Dense(1)
-    ])
-    value_model.compile('adam', loss='MSE')
-    value_model.summary()
+        # value/critic model
+        value_model = tf.keras.models.Sequential([
+            tf.keras.layers.Dense(64, activation='tanh', input_shape=obs_spc.shape),
+            tf.keras.layers.Dense(64, activation='tanh'),
+            tf.keras.layers.Dense(1)
+        ])
+        value_model.compile('adam', loss='MSE')
+        value_model.summary()
 
-    if load_dir:
-        load_model(model, load_dir + env_name)
+        if load_dir:
+            load_model(model, load_dir + env_name)
 
-    if args.test != None:
-        env.render()
-        test(epochs, env, model)
-    else:
-        train(epochs, env, size, model, value_model, γ, λ)
-        if save_dir==None:
-            save_dir = 'model/'
-            save_model(model, save_dir + env_name)
+        if args.test != None:
+            env.render()
+            test(epochs, env, model)
+        else:
+            train(epochs, env, size, model, value_model, γ, λ)
+            if save_dir==None:
+                save_dir = 'model/'
+                save_model(model, save_dir + env_name)
+        wandb.finish()
