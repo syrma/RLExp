@@ -154,6 +154,17 @@ def train_one_epoch(env, batch_size, model, value_model, γ, λ):
 
 first_start_time = time.time()
 
+def save_model(model, save_path):
+    ckpt = tf.train.Checkpoint(model=model)
+    manager = tf.train.CheckpointManager(ckpt, save_path, max_to_keep=None)
+    manager.save()
+
+def load_model(model, load_path):
+    ckpt = tf.train.Checkpoint(model=model)
+    manager = tf.train.CheckpointManager(ckpt, load_path, max_to_keep=None)
+    ckpt.restore(manager.latest_checkpoint)
+    print("Restoring from {}".format(manager.latest_checkpoint))
+
 def train(epochs, env, batch_size, model, value_model, γ, λ):
     for i in range(1, epochs+1):
         start_time = time.time()
@@ -179,14 +190,26 @@ def test(epochs, env, model):
         print("Episode reward", episode_rew)
 
 if __name__=="__main__":
-    num_runs = 1
-    env_name = 'CartPole-v0'
+
+    parser = argparse.ArgumentParser(description='Train or test VPG')
+    parser.add_argument('test', nargs='?', help = 'Test a saved or a random model')
+    parser.add_argument('--load_dir', help='Optional: directory of saved model to test or resume training')
+    parser.add_argument('--env_name', help='Environment name to use with OpenAI Gym')
+    parser.add_argument('--save_dir', help='Optional: directory where the model should be saved')
+    parser.add_argument('--num_runs', help='Number of runs')
+
+    args = parser.parse_args()
+
+    save_dir = args.save_dir
+    load_dir = args.load_dir
+    num_runs = int(args.num_runs) if args.num_runs else 1
+
+    env_name = args.env_name if args.env_name else 'CartPole-v0'
     env = gym.make(env_name)
-    env.render()
     obs_spc = env.observation_space
     act_spc = env.action_space
 
-    epochs = 30
+    epochs = 100
     batch_size = 5000
     learning_rate = 1e-2
     opt = tf.optimizers.Adam(learning_rate)
@@ -222,5 +245,16 @@ if __name__=="__main__":
         value_model.compile('adam', loss='MSE')
         value_model.summary()
 
-        train(epochs, env, batch_size, model, value_model, γ, λ)
+        if load_dir:
+              load_model(model, load_dir)
+              save_dir = load_dir
+
+        if args.test != None:
+            env.render()
+            test(epochs, env, model)
+        else:
+            train(epochs, env, batch_size, model, value_model, γ, λ)
+            if save_dir==None:
+                save_dir = 'model/'+env_name+str(x)
+            save_model(model, save_dir)
         wandb.finish()
