@@ -134,7 +134,7 @@ def train_one_epoch(env, batch_size, model, value_model, γ, λ):
     if act_spc.shape:
         var_list.append(model.log_std)
 
-    opt.minimize(batch.loss, var_list=var_list)
+    pi_opt.minimize(batch.loss, var_list=var_list)
 
     train_time = time.time() - train_start_time
     run_time = train_start_time - start_time
@@ -188,8 +188,8 @@ if __name__=="__main__":
 
     epochs = 30
     batch_size = 5000
-    learning_rate = 1e-2
-    opt = tf.optimizers.Adam(learning_rate)
+    pi_opt = tf.optimizers.Adam(learning_rate=3e-4)
+    vf_opt = tf.optimizers.Adam(learning_rate=1e-3)
     γ = .99
     λ = 0.97
 
@@ -200,7 +200,7 @@ if __name__=="__main__":
         wandb.config.algo = 'vpg_gae_buf'
         wandb.config.epochs = epochs
         wandb.config.batch_size = batch_size
-        wandb.config.learning_rate = learning_rate
+        #wandb.config.learning_rate = learning_rate
         wandb.config.lam = λ
         wandb.config.gamma = γ
 
@@ -219,7 +219,7 @@ if __name__=="__main__":
             tf.keras.layers.Dense(64, activation='tanh'),
             tf.keras.layers.Dense(1)
         ])
-        value_model.compile('adam', loss='MSE')
+        value_model.compile(vf_opt, loss='MSE')
         value_model.summary()
 
         train(epochs, env, batch_size, model, value_model, γ, λ)
