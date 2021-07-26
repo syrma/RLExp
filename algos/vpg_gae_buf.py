@@ -72,6 +72,7 @@ class Buffer(object):
 
             self.V_hats = self.V_hats.stack()
             self.gae = self.gae.stack()
+            self.V_hats = (self.V_hats - tf.reduce_mean(self.V_hats)) / tf.math.reduce_std(self.V_hats)
 
     #@tf.function
     def loss(self):
