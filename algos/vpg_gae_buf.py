@@ -143,7 +143,7 @@ def train_one_epoch(env, batch_size, model, value_model, γ, λ):
     print('run time', run_time, 'train time', train_time)
     print('AvgEpRet:', tf.reduce_mean(batch.rets).numpy())
 
-    hist = value_model.fit(batch.obs_buf.numpy(), batch.V_hats.numpy())
+    hist = value_model.fit(batch.obs_buf, batch.V_hats, batch_size=batch.size, epochs=80)
     wandb.log({'LossV': tf.reduce_mean(hist.history['loss']).numpy(),
                'EpRet': wandb.Histogram(batch.rets),
                'AvgEpRet': tf.reduce_mean(batch.rets),
