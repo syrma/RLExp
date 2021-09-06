@@ -259,8 +259,8 @@ if __name__ == '__main__':
 
         # policy/actor model
         model = tf.keras.models.Sequential([
-            tf.keras.layers.Dense(64, activation='tanh', input_shape=obs_spc.shape),
-            tf.keras.layers.Dense(64, activation='tanh'),
+            tf.keras.layers.Dense(120, activation='tanh', input_shape=obs_spc.shape),
+            tf.keras.layers.Dense(84, activation='tanh'),
             tf.keras.layers.Dense(act_spc.shape[0] if act_spc.shape else act_spc.n)
         ])
         if act_spc.shape:
@@ -270,7 +270,6 @@ if __name__ == '__main__':
         # value/critic model
         value_model = tf.keras.models.Sequential([
             tf.keras.layers.Dense(64, activation='tanh', input_shape=obs_spc.shape),
-            tf.keras.layers.Dense(64, activation='tanh'),
             tf.keras.layers.Dense(1)
         ])
         value_model.compile('adam', loss='MSE')
