@@ -248,7 +248,7 @@ if __name__ == '__main__':
     λ = 0.97
 
     for x in range(num_runs):
-        exp_name = "ppo-" + env_name + str(time.time())
+        exp_name = f"ppo-{env_name}-{time.strftime('%d-%m_%H:%M')}"
         wandb.init(project='ppo', entity='rlexp', reinit=True, name=exp_name, monitor_gym=True, save_code=True)
         wandb.config.env = env_name
         wandb.config.epochs = epochs
