@@ -1,3 +1,5 @@
+import os
+
 import tensorflow as tf
 import gym
 import pybullet_envs
@@ -5,8 +7,10 @@ import time
 import math
 import argparse
 import wandb
-import tensorflow_probability as tfp
 import sys
+from gym.wrappers import Monitor
+import tempfile
+import tensorflow_probability as tfp
 tfd = tfp.distributions
 
 class Buffer(object):
@@ -132,6 +136,9 @@ def run_one_episode(env, buf):
     if done:
         buf.finish_path()
     else:
+        while not done:
+            act, prob = action(buf.model, obs, env)
+            new_obs, rew, done, _ = env.step(act.numpy())
         buf.finish_path(obs)
 
     return time.time() - critic_start
@@ -241,7 +248,7 @@ if __name__ == '__main__':
     act_spc = env.action_space
 
     batch_size = 5000
-    epochs = 100
+    epochs = 30
     learning_rate = 1e-2
     opt = tf.optimizers.Adam(learning_rate)
     γ = .99
@@ -279,12 +286,15 @@ if __name__ == '__main__':
         if load_dir:
             load_model(model, load_dir +'/'+ env_name)
 
+        recordings = tempfile.mkdtemp(prefix='recordings', dir='.')
         if args.test != None:
             env.render()
             test(epochs, env, model)
         else:
+            monitor_env = Monitor(env, recordings, force=True)
             train(epochs, env, batch_size, model, value_model, γ, λ)
             if save_dir==None:
                 save_dir = 'model/'
                 save_model(model, save_dir+env_name)
+        
         wandb.finish()

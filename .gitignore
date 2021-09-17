@@ -2,5 +2,8 @@
 algos/model/
 algos/utils/__pycache__
 algos/wandb/
+algos/videos
+algos/.ipynb_checkpoints
+algos/recordingslny1anke/
 wandb
 model
