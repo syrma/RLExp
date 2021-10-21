@@ -1,13 +1,14 @@
 import tensorflow as tf
 import tensorflow_probability as tfp
 tfd = tfp.distributions
-
+from gym.wrappers import Monitor
 import gym
 import pybullet_envs
 import time
 import wandb
 import math
 import argparse
+import tempfile
 
 class Buffer(object):
     def __init__(self, obs_spc, act_spc, model, value_model, size, gam=0.99, lam=0.97):
@@ -96,13 +97,12 @@ def action(model, obs, act_spc):
 
     return dist.sample()
 
-def run_one_episode(env, buf):
+def run_one_episode(real_env, monitor_env, buf):
+    env = monitor_env
     obs_dtype = env.observation_space.dtype
-
     obs = env.reset()
     obs = tf.cast(obs, obs_dtype)
     done = False
-
     for i in range(buf.ptr, buf.size):
         act = action(buf.model, obs, env.action_space)
         new_obs, rew, done, _ = env.step(act.numpy())
@@ -113,21 +113,21 @@ def run_one_episode(env, buf):
 
         if done:
             break
-
+    env = real_env
     if done:
         buf.finish_path()
     else:
         buf.finish_path(obs)
 
-def train_one_epoch(env, batch_size, model, value_model, γ, λ):
-    obs_spc = env.observation_space
-    act_spc = env.action_space
+def train_one_epoch(real_env, monitor_env, batch_size, model, value_model, γ, λ):
+    obs_spc = real_env.observation_space
+    act_spc = real_env.action_space
 
     batch = Buffer(obs_spc, act_spc, model, value_model, batch_size, gam=γ, lam=λ)
     start_time = time.time()
 
     while batch.ptr < batch.size:
-        run_one_episode(env, batch)
+        run_one_episode(real_env, monitor_env, batch)
 
     train_start_time = time.time()
 
@@ -155,11 +155,11 @@ def train_one_epoch(env, batch_size, model, value_model, γ, λ):
 
 first_start_time = time.time()
 
-def train(epochs, env, batch_size, model, value_model, γ, λ):
+def train(epochs, real_env, monitor_env, batch_size, model, value_model, γ, λ):
     for i in range(1, epochs+1):
         start_time = time.time()
         print('Epoch', i)
-        batch_loss = train_one_epoch(env, batch_size, model, value_model, γ, λ)
+        batch_loss = train_one_epoch(real_env, monitor_env, batch_size, model, value_model, γ, λ)
         now = time.time()
         
         wandb.log({'Epoch': i,
@@ -169,7 +169,6 @@ def train(epochs, env, batch_size, model, value_model, γ, λ):
 
 def test(epochs, env, model):
     for i in range(1, epochs+1):
-
         obs, done = env.reset(), False
         episode_rew = 0
         while not done:
@@ -182,8 +181,9 @@ def test(epochs, env, model):
 if __name__=="__main__":
     num_runs = 1
     env_name = 'CartPole-v0'
-    env = gym.make(env_name)
-    env.render()
+    env = real_env = gym.make(env_name)
+    recordings = tempfile.mkdtemp(prefix='recordings', dir='.')
+    monitor_env = Monitor(env, recordings, force=True)
     obs_spc = env.observation_space
     act_spc = env.action_space
 
@@ -223,5 +223,5 @@ if __name__=="__main__":
         value_model.compile(vf_opt, loss='MSE')
         value_model.summary()
 
-        train(epochs, env, batch_size, model, value_model, γ, λ)
+        train(epochs, real_env, monitor_env, batch_size, model, value_model, γ, λ)
         wandb.finish()
