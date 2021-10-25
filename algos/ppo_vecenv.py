@@ -240,7 +240,7 @@ if __name__ == '__main__':
     act_spc = env.action_space
 
     for x in range(num_runs):
-        wandb.init(project='ppo', entity='rlexp', reinit=True)
+        wandb.init(project='ppo_vecenv_oldarch', entity='rlexp', reinit=True)
         wandb.config.env = env_name
         wandb.config.epochs = epochs
         wandb.config.size = size
