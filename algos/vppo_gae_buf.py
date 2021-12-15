@@ -248,7 +248,7 @@ if __name__ == '__main__':
     act_spc = env.action_space
 
     batch_size = 5000
-    epochs = 30
+    epochs = 100
     learning_rate = 1e-2
     opt = tf.optimizers.Adam(learning_rate)
     γ = .99

@@ -186,7 +186,7 @@ if __name__=="__main__":
     obs_spc = env.observation_space
     act_spc = env.action_space
 
-    epochs = 30
+    epochs = 100
     batch_size = 5000
     learning_rate = 1e-2
     opt = tf.optimizers.Adam(learning_rate)

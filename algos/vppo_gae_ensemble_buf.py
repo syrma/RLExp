@@ -73,9 +73,6 @@ class Buffer(object):
 
         #Vs = tf.squeeze(value_model(self.obs_buf.gather(current_episode)), axis=1)
 
-
-#TODO: debug this mess
-
         predictions = [tf.squeeze(value_model(self.obs_buf.gather(current_episode))) for value_model in self.critics]
         Vs = tf.math.reduce_mean(predictions, axis=0)
         Vsp1 = tf.concat([Vs[1:], [last_val]], axis=0)
