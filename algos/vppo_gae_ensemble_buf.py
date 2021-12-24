@@ -181,11 +181,11 @@ def train_one_epoch(env, batch_size, model, critics, γ, λ):
     print('run time', run_time, 'critic time (included in run time):', critic_time, 'train time', train_time)
     print('AvgEpRet:', tf.reduce_mean(batch.rets).numpy())
 
-    for value_model in critics:
-        hist = value_model.fit(batch.obs_buf.numpy(), batch.V_hats.numpy(), batch_size=32)
+    for i in range(len(critics)):
+        hist = critics[i].fit(batch.obs_buf.numpy(), batch.V_hats.numpy(), batch_size=32)
+        wandb.log({f'LossV{i}': tf.reduce_mean(hist.history['loss']).numpy()})
 
-    wandb.log({#'LossV': tf.reduce_mean(hist.history['loss']).numpy(),
-               'EpRet': wandb.Histogram(batch.rets),
+    wandb.log({'EpRet': wandb.Histogram(batch.rets),
                'AvgEpRet': tf.reduce_mean(batch.rets),
                'EpLen': tf.reduce_mean(batch.lens),
                'VVals': wandb.Histogram(batch.V_hats)},
