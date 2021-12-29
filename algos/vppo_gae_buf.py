@@ -248,15 +248,14 @@ if __name__ == '__main__':
     act_spc = env.action_space
 
     batch_size = 5000
-    epochs = 100
+    epochs = 200
     learning_rate = 1e-2
     opt = tf.optimizers.Adam(learning_rate)
     γ = .99
     λ = 0.97
 
     for x in range(num_runs):
-        exp_name = "ppo-" + env_name + str(time.time())
-        wandb.init(project='ppo', entity='rlexp', reinit=True, name=exp_name, monitor_gym=True, save_code=True)
+        wandb.init(project='ppo', entity='rlexp', reinit=True, name='new architecture', monitor_gym=True, save_code=True)
         wandb.config.env = env_name
         wandb.config.epochs = epochs
         wandb.config.batch_size = batch_size
@@ -266,8 +265,8 @@ if __name__ == '__main__':
 
         # policy/actor model
         model = tf.keras.models.Sequential([
-            tf.keras.layers.Dense(64, activation='tanh', input_shape=obs_spc.shape),
-            tf.keras.layers.Dense(64, activation='tanh'),
+            tf.keras.layers.Dense(120, activation='relu', input_shape=obs_spc.shape),
+            tf.keras.layers.Dense(84, activation='relu'),
             tf.keras.layers.Dense(act_spc.shape[0] if act_spc.shape else act_spc.n)
         ])
         if act_spc.shape:
@@ -276,8 +275,7 @@ if __name__ == '__main__':
 
         # value/critic model
         value_model = tf.keras.models.Sequential([
-            tf.keras.layers.Dense(64, activation='tanh', input_shape=obs_spc.shape),
-            tf.keras.layers.Dense(64, activation='tanh'),
+            tf.keras.layers.Dense(64, activation='relu', input_shape=obs_spc.shape),
             tf.keras.layers.Dense(1)
         ])
         value_model.compile('adam', loss='MSE')
