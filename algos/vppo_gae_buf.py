@@ -255,7 +255,7 @@ if __name__ == '__main__':
     λ = 0.97
 
     for x in range(num_runs):
-        wandb.init(mode="disabled", project='ppo', entity='rlexp', reinit=True, name='new architecture', monitor_gym=True, save_code=True)
+        wandb.init(project='ppo', entity='rlexp', reinit=True, name='new architecture', monitor_gym=True, save_code=True)
         wandb.config.env = env_name
         wandb.config.epochs = epochs
         wandb.config.batch_size = batch_size
