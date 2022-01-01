@@ -73,7 +73,7 @@ class Buffer(object):
 
         #Vs = tf.squeeze(value_model(self.obs_buf.gather(current_episode)), axis=1)
 
-        predictions = [tf.squeeze(value_model(self.obs_buf.gather(current_episode))) for value_model in self.critics]
+        predictions = [tf.squeeze(value_model(self.obs_buf.gather(current_episode)), axis=1) for value_model in self.critics]
         Vs = tf.math.reduce_mean(predictions, axis=0)
         Vsp1 = tf.concat([Vs[1:], [last_val]], axis=0)
         deltas = self.rew_buf.gather(current_episode) + self.gam * Vsp1 - Vs
@@ -269,7 +269,7 @@ if __name__ == '__main__':
     λ = 0.97
 
     for x in range(num_runs):
-        wandb.init(project='ppo (master)', entity='rlexp', reinit=True, name="old architecture ensemble", monitor_gym=True, save_code=True)
+        wandb.init(mode="disabled", project='ppo (master)', entity='rlexp', reinit=True, name="old architecture ensemble", monitor_gym=True, save_code=True)
         wandb.config.env = env_name
         wandb.config.epochs = epochs
         wandb.config.batch_size = batch_size
@@ -303,15 +303,15 @@ if __name__ == '__main__':
         if load_dir:
             load_model(model, load_dir +'/'+ env_name)
 
-        recordings = tempfile.mkdtemp(prefix='recordings', dir='.')
         if args.test != None:
             env.render()
             test(epochs, env, model)
         else:
-            monitor_env = Monitor(env, recordings, force=True)
-            train(epochs, env, batch_size, model, critics, γ, λ)
-            if save_dir==None:
-                save_dir = 'model/'
-                save_model(model, save_dir+env_name)
+            with tempfile.TemporaryDirectory(prefix='recordings', dir='.') as recordings:
+                monitor_env = Monitor(env, recordings, force=True)
+                train(epochs, env, batch_size, model, critics, γ, λ)
+                if save_dir==None:
+                    save_dir = 'model/'
+                    save_model(model, save_dir+env_name)
         
         wandb.finish()

@@ -255,7 +255,7 @@ if __name__ == '__main__':
     λ = 0.97
 
     for x in range(num_runs):
-        wandb.init(project='ppo', entity='rlexp', reinit=True, name='new architecture', monitor_gym=True, save_code=True)
+        wandb.init(mode="disabled", project='ppo', entity='rlexp', reinit=True, name='new architecture', monitor_gym=True, save_code=True)
         wandb.config.env = env_name
         wandb.config.epochs = epochs
         wandb.config.batch_size = batch_size
@@ -284,15 +284,15 @@ if __name__ == '__main__':
         if load_dir:
             load_model(model, load_dir +'/'+ env_name)
 
-        recordings = tempfile.mkdtemp(prefix='recordings', dir='.')
         if args.test != None:
             env.render()
             test(epochs, env, model)
         else:
-            monitor_env = Monitor(env, recordings, force=True)
-            train(epochs, env, batch_size, model, value_model, γ, λ)
-            if save_dir==None:
-                save_dir = 'model/'
-                save_model(model, save_dir+env_name)
+            with tempfile.TemporaryDirectory(prefix='recordings', dir='.') as recordings:
+                monitor_env = Monitor(env, recordings, force=True)
+                train(epochs, env, batch_size, model, value_model, γ, λ)
+                if save_dir==None:
+                    save_dir = 'model/'
+                    save_model(model, save_dir+env_name)
         
         wandb.finish()
