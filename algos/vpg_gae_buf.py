@@ -118,7 +118,7 @@ def run_one_episode(env, buf):
         buf.finish_path()
     else:
         while not done:
-            act, prob = action(buf.model, obs, env)
+            act = action(buf.model, obs, env)
             new_obs, rew, done, _ = env.step(act.numpy())
         buf.finish_path(obs)
 
@@ -185,8 +185,6 @@ if __name__=="__main__":
     num_runs = 1
     env_name = 'CartPole-v0'
     env = gym.make(env_name)
-    recordings = tempfile.mkdtemp(prefix='recordings', dir='.')
-    monitor_env = Monitor(env, recordings, force=True)
     obs_spc = env.observation_space
     act_spc = env.action_space
 
@@ -226,5 +224,8 @@ if __name__=="__main__":
         value_model.compile('adam', loss='MSE')
         value_model.summary()
 
-        train(epochs, env, batch_size, model, value_model, γ, λ)
+        with tempfile.TemporaryDirectory(prefix='recordings', dir='.') as recordings:
+            monitor_env = Monitor(env, recordings, force=True)
+            train(epochs, env, batch_size, model, value_model, γ, λ)
+
         wandb.finish()
