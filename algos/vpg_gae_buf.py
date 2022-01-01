@@ -208,8 +208,8 @@ if __name__=="__main__":
 
         # construct the model
         model = tf.keras.models.Sequential([
-            tf.keras.layers.Dense(64, activation='tanh', input_shape=obs_spc.shape),
-            tf.keras.layers.Dense(64, activation='tanh'),
+            tf.keras.layers.Dense(120, activation='relu', input_shape=obs_spc.shape),
+            tf.keras.layers.Dense(84, activation='relu'),
             tf.keras.layers.Dense(act_spc.shape[0] if act_spc.shape else act_spc.n)
         ])
         if act_spc.shape:
@@ -217,8 +217,7 @@ if __name__=="__main__":
         model.summary()
 
         value_model = tf.keras.models.Sequential([
-            tf.keras.layers.Dense(64, activation='tanh', input_shape=obs_spc.shape),
-            tf.keras.layers.Dense(64, activation='tanh'),
+            tf.keras.layers.Dense(64, activation='relu', input_shape=obs_spc.shape),
             tf.keras.layers.Dense(1)
         ])
         value_model.compile('adam', loss='MSE')
