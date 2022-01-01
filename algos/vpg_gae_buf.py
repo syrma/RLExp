@@ -197,7 +197,7 @@ if __name__=="__main__":
 
     for x in range(num_runs):
         exp_name = "vpg-" + env_name + str(time.time())
-        wandb.init(mode="disabled", project='vpg', entity='rlexp', reinit=True, name=exp_name, monitor_gym=True, save_code=True)
+        wandb.init(project='vpg', entity='rlexp', reinit=True, name='old architecture', monitor_gym=True, save_code=True)
         wandb.config.env = env_name
         wandb.config.algo = 'vpg_gae_buf'
         wandb.config.epochs = epochs
