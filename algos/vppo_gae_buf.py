@@ -292,10 +292,9 @@ if __name__ == '__main__':
             env.render()
             test(epochs, env, model)
         else:
-            with tempfile.TemporaryDirectory(prefix='recordings', dir='.') as recordings:
-                monitor_env = Monitor(env, recordings, force=True)
-                train(epochs, env, batch_size, model, value_model, γ, λ)
-                if save_dir==None:
-                    save_dir = 'model/'
-                    save_model(model, save_dir+env_name)
-                wandb.finish()
+            monitor_env = Monitor(env, 'recordings', force=True)
+            train(epochs, env, batch_size, model, value_model, γ, λ)
+            if save_dir==None:
+                save_dir = 'model/'
+                save_model(model, save_dir+env_name)
+            wandb.finish()
