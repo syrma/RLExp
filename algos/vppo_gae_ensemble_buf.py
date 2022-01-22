@@ -312,5 +312,4 @@ if __name__ == '__main__':
                 if save_dir==None:
                     save_dir = 'model/'
                     save_model(model, save_dir+env_name)
-        
-        wandb.finish()
+                wandb.finish()

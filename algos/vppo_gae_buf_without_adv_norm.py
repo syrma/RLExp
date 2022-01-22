@@ -70,9 +70,8 @@ class Buffer(object):
         discounts = tf.math.cumprod(tf.fill(deltas.shape, self.gam * self.lam), exclusive=True)
         gae = tf.math.cumsum(discounts * deltas, reverse=True)
 
-        #Normalise the advantage
-        gae = (gae - tf.math.reduce_mean(gae)) / (tf.math.reduce_std(gae) + 1e-8)
 
+        
         self.gae = self.gae.scatter(current_episode, gae)
 
         self.last_idx = self.ptr
@@ -166,7 +165,6 @@ def train_one_epoch(env, batch_size, model, value_model, γ, λ):
         var_list.append(model.log_std)
 
     opt.minimize(batch.loss, var_list=var_list)
-    hist = value_model.fit(batch.obs_buf.numpy(), batch.V_hats.numpy(), batch_size=32)
 
     train_time = time.time() - train_start_time
     run_time = train_start_time - start_time
@@ -174,6 +172,7 @@ def train_one_epoch(env, batch_size, model, value_model, γ, λ):
     print('run time', run_time, 'critic time (included in run time):', critic_time, 'train time', train_time)
     print('AvgEpRet:', tf.reduce_mean(batch.rets).numpy())
 
+    hist = value_model.fit(batch.obs_buf.numpy(), batch.V_hats.numpy(), batch_size=32)
     wandb.log({'LossV': tf.reduce_mean(hist.history['loss']).numpy(),
                'EpRet': wandb.Histogram(batch.rets),
                'AvgEpRet': tf.reduce_mean(batch.rets),
@@ -259,7 +258,7 @@ if __name__ == '__main__':
     λ = 0.97
 
     for x in range(num_runs):
-        wandb.init(project='ppo2', entity='rlexp', reinit=True, name='adv_norm', monitor_gym=True, save_code=True)
+        wandb.init(project='ppo', entity='rlexp', reinit=True, name='new architecture', monitor_gym=True, save_code=True)
         wandb.config.env = env_name
         wandb.config.epochs = epochs
         wandb.config.batch_size = batch_size
