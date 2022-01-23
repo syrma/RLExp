@@ -165,8 +165,9 @@ def train_one_epoch(env, batch_size, model, value_model, γ, λ):
     if act_spc.shape:
         var_list.append(model.log_std)
 
-    opt.minimize(batch.loss, var_list=var_list)
-    hist = value_model.fit(batch.obs_buf.numpy(), batch.V_hats.numpy(), batch_size=32)
+    for _ in range(80):
+        opt.minimize(batch.loss, var_list=var_list)
+    hist = value_model.fit(batch.obs_buf.numpy(), batch.V_hats.numpy(), epochs=80, steps_per_epoch=1, verbose=0)
 
     train_time = time.time() - train_start_time
     run_time = train_start_time - start_time
@@ -253,7 +254,7 @@ if __name__ == '__main__':
 
     batch_size = 5000
     epochs = 200
-    learning_rate = 1e-2
+    learning_rate = 3e-4
     opt = tf.optimizers.Adam(learning_rate)
     γ = .99
     λ = 0.97
