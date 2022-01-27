@@ -248,10 +248,6 @@ if __name__ == '__main__':
     load_dir = args.load_dir
     num_runs = int(args.num_runs) if args.num_runs else 1
 
-    env = gym.make(env_name)
-    obs_spc = env.observation_space
-    act_spc = env.action_space
-
     batch_size = 5000
     epochs = 200
     learning_rate = 3e-4
@@ -260,13 +256,18 @@ if __name__ == '__main__':
     λ = 0.97
 
     for x in range(num_runs):
-        wandb.init(project='ppo2', entity='rlexp', reinit=True, name='adv_norm', monitor_gym=True, save_code=True)
+        wandb.init(project='pybullet-experiments', entity='rlexp', reinit=True, name='simple', monitor_gym=True, save_code=True)
         wandb.config.env = env_name
         wandb.config.epochs = epochs
         wandb.config.batch_size = batch_size
         wandb.config.learning_rate = learning_rate
         wandb.config.lam = λ
         wandb.config.gamma = γ
+
+        #env
+        env = gym.make(env_name)
+        obs_spc = env.observation_space
+        act_spc = env.action_space
 
         # policy/actor model
         model = tf.keras.models.Sequential([
@@ -294,7 +295,7 @@ if __name__ == '__main__':
             test(epochs, env, model)
         else:
             monitor_env = Monitor(env, 'recordings', force=True)
-            train(epochs, env, batch_size, model, value_model, γ, λ)
+            train(epochs, monitor_env, batch_size, model, value_model, γ, λ)
             if save_dir==None:
                 save_dir = 'model/'
                 save_model(model, save_dir+env_name)

@@ -173,7 +173,8 @@ def train_one_epoch(env, batch_size, model, critics, γ, λ):
     if act_spc.shape:
         var_list.append(model.log_std)
 
-    opt.minimize(batch.loss, var_list=var_list)
+    for _ in range(80):
+        opt.minimize(batch.loss, var_list=var_list)
 
     train_time = time.time() - train_start_time
     run_time = train_start_time - start_time
@@ -182,7 +183,7 @@ def train_one_epoch(env, batch_size, model, critics, γ, λ):
     print('AvgEpRet:', tf.reduce_mean(batch.rets).numpy())
 
     for i in range(len(critics)):
-        hist = critics[i].fit(batch.obs_buf.numpy(), batch.V_hats.numpy(), batch_size=32)
+        hist = critics[i].fit(batch.obs_buf.numpy(), batch.V_hats.numpy(), epochs=80, steps_per_epoch=1, verbose=0)
         wandb.log({f'LossV{i}': tf.reduce_mean(hist.history['loss']).numpy()})
 
     wandb.log({'EpRet': wandb.Histogram(batch.rets),
@@ -244,7 +245,8 @@ if __name__ == '__main__':
     parser.add_argument('--load_dir', help='Optional: directory of saved model to test or resume training')
     parser.add_argument('--env_name', help='Environment name to use with OpenAI Gym')
     parser.add_argument('--save_dir', help='Optional: directory where the model should be saved')
-    parser.add_argument('--num_runs', help='Number of runs')
+    parser.add_argument('--num_critics', default=3, type=int, help='Number of critics')
+    parser.add_argument('--seed', nargs='+', default=[0], type=int, help='Seed')
 
     args = parser.parse_args()
 
@@ -253,29 +255,38 @@ if __name__ == '__main__':
         #parser.error("No env_name provided.")
         env_name="CartPole-v0"
 
+    seeds = args.seed
+    n_critics = args.num_critics
+
     save_dir = args.save_dir
     load_dir = args.load_dir
-    num_runs = int(args.num_runs) if args.num_runs else 1
-
-    env = gym.make(env_name)
-    obs_spc = env.observation_space
-    act_spc = env.action_space
 
     batch_size = 5000
-    epochs = 100
-    learning_rate = 1e-2
+    epochs = 200
+    learning_rate = 3e-4
     opt = tf.optimizers.Adam(learning_rate)
     γ = .99
     λ = 0.97
 
-    for x in range(num_runs):
-        wandb.init(project='ppo', entity='rlexp', reinit=True, name="new architecture ensemble", monitor_gym=True, save_code=True)
+    for seed in seeds:
+        wandb.init(project='pybullet-GC-experiments', entity='rlexp', reinit=True, name=f"ensemble-{n_critics}-{seed}", monitor_gym=True, save_code=True)
         wandb.config.env = env_name
         wandb.config.epochs = epochs
         wandb.config.batch_size = batch_size
         wandb.config.learning_rate = learning_rate
         wandb.config.lam = λ
         wandb.config.gamma = γ
+        wandb.config.seed = seed
+
+        #environment creation
+        env = gym.make(env_name)
+        obs_spc = env.observation_space
+        act_spc = env.action_space
+
+        tf.random.set_seed(seed)
+        env.seed(seed)
+        act_spc.seed(seed)
+        obs_spc.seed(seed)
 
         # policy/actor model
         model = tf.keras.models.Sequential([
@@ -288,7 +299,6 @@ if __name__ == '__main__':
         model.summary()
 
         # value/critic model
-        n_critics = 5
         critics = list()
 
         for _ in range(n_critics):
@@ -306,10 +316,9 @@ if __name__ == '__main__':
             env.render()
             test(epochs, env, model)
         else:
-            with tempfile.TemporaryDirectory(prefix='recordings', dir='.') as recordings:
-                monitor_env = Monitor(env, recordings, force=True)
-                train(epochs, env, batch_size, model, critics, γ, λ)
-                if save_dir==None:
-                    save_dir = 'model/'
-                    save_model(model, save_dir+env_name)
-                wandb.finish()
+            monitor_env = Monitor(env, 'recordings', force=True)
+            train(epochs, monitor_env, batch_size, model, critics, γ, λ)
+            if save_dir==None:
+                save_dir = 'model/'
+                save_model(model, save_dir+env_name)
+        wandb.finish()
