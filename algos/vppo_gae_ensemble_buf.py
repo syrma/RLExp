@@ -262,7 +262,7 @@ if __name__ == '__main__':
     load_dir = args.load_dir
 
     batch_size = 5000
-    epochs = 200
+    epochs = 400
     learning_rate = 3e-4
     opt = tf.optimizers.Adam(learning_rate)
     γ = .99
@@ -277,12 +277,14 @@ if __name__ == '__main__':
         wandb.config.lam = λ
         wandb.config.gamma = γ
         wandb.config.seed = seed
+        wandb.config.n_critics = n_critics
 
         #environment creation
         env = gym.make(env_name)
         obs_spc = env.observation_space
         act_spc = env.action_space
 
+        #seeding
         tf.random.set_seed(seed)
         env.seed(seed)
         act_spc.seed(seed)
