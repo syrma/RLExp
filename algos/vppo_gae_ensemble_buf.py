@@ -81,6 +81,10 @@ class Buffer(object):
         # compute the advantage function (gae)
         discounts = tf.math.cumprod(tf.fill(deltas.shape, self.gam * self.lam), exclusive=True)
         gae = tf.math.cumsum(discounts * deltas, reverse=True)
+
+        #Normalise the advantage
+        gae = (gae - tf.math.reduce_mean(gae)) / (tf.math.reduce_std(gae) + 1e-8)
+
         self.gae = self.gae.scatter(current_episode, gae)
 
         self.last_idx = self.ptr
@@ -184,7 +188,7 @@ def train_one_epoch(env, batch_size, model, critics, γ, λ):
 
     for i in range(len(critics)):
         hist = critics[i].fit(batch.obs_buf.numpy(), batch.V_hats.numpy(), epochs=80, steps_per_epoch=1, verbose=0)
-        wandb.log({f'LossV{i}': tf.reduce_mean(hist.history['loss']).numpy()})
+        wandb.log({f'LossV{i}': tf.reduce_mean(hist.history['loss']).numpy()}, commit=False)
 
     wandb.log({'EpRet': wandb.Histogram(batch.rets),
                'AvgEpRet': tf.reduce_mean(batch.rets),
@@ -239,7 +243,6 @@ first_start_time = time.time()
 # training loop
 
 if __name__ == '__main__':
-
     parser = Parser(description='Train or test PPO')
     parser.add_argument('test', nargs='?', help = 'Test a saved or a random model')
     parser.add_argument('--load_dir', help='Optional: directory of saved model to test or resume training')
@@ -269,7 +272,8 @@ if __name__ == '__main__':
     λ = 0.97
 
     for seed in seeds:
-        wandb.init(project='pybullet-GC-experiments', entity='rlexp', reinit=True, name=f"ensemble-{n_critics}-{seed}", monitor_gym=True, save_code=True)
+        run_name = f"ensemble-{n_critics}-{seed}"
+        wandb.init(project='pybullet-GC-experiments', entity='rlexp', reinit=True, name=run_name, monitor_gym=True, save_code=True)
         wandb.config.env = env_name
         wandb.config.epochs = epochs
         wandb.config.batch_size = batch_size
@@ -278,6 +282,7 @@ if __name__ == '__main__':
         wandb.config.gamma = γ
         wandb.config.seed = seed
         wandb.config.n_critics = n_critics
+        wandb.config.norm_adv = True
 
         #environment creation
         env = gym.make(env_name)
@@ -318,7 +323,7 @@ if __name__ == '__main__':
             env.render()
             test(epochs, env, model)
         else:
-            monitor_env = Monitor(env, 'recordings', force=True)
+            monitor_env = Monitor(env, f"recordings/{run_name}", force=True)
             train(epochs, monitor_env, batch_size, model, critics, γ, λ)
             if save_dir==None:
                 save_dir = 'model/'
