@@ -273,7 +273,7 @@ if __name__ == '__main__':
 
     for seed in seeds:
         run_name = f"ensemble-{n_critics}-{seed}"
-        wandb.init(project='pybullet-GC-experiments', entity='rlexp', reinit=True, name=run_name, monitor_gym=True, save_code=True)
+        wandb.init(project='pybullet-GC-experiments2', entity='rlexp', reinit=True, name=run_name, monitor_gym=True, save_code=True)
         wandb.config.env = env_name
         wandb.config.epochs = epochs
         wandb.config.batch_size = batch_size

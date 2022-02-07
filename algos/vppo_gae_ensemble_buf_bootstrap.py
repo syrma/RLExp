@@ -187,7 +187,7 @@ def train_one_epoch(env, batch_size, model, critics, γ, λ):
     print('AvgEpRet:', tf.reduce_mean(batch.rets).numpy())
 
     for i in range(len(critics)):
-        mask = tf.random.uniform([batch.size]) > 0
+        mask = tf.random.uniform([batch.size]) < 0.9
         masked_obs = tf.boolean_mask(batch.obs_buf, mask)
         masked_vhats = tf.boolean_mask(batch.V_hats, mask)
         hist = critics[i].fit(masked_obs.numpy(), masked_vhats.numpy(), epochs=80, steps_per_epoch=1, verbose=0)
@@ -276,7 +276,7 @@ if __name__ == '__main__':
 
     for seed in seeds:
         run_name = f"ensemble-{n_critics}-{seed}"
-        wandb.init(project='pybullet-GC-experiments', entity='rlexp', reinit=True, name=run_name, monitor_gym=True, save_code=True)
+        wandb.init(project='pybullet-GC-experiments2', entity='rlexp', reinit=True, name=run_name, monitor_gym=True, save_code=True)
         wandb.config.env = env_name
         wandb.config.epochs = epochs
         wandb.config.batch_size = batch_size
