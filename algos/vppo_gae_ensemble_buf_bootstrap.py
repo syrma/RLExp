@@ -172,7 +172,7 @@ def run_one_episode(env, buf):
     return time.time() - critic_start
 
 
-def train_one_epoch(env, batch_size, model, critics, γ, λ):
+def train_one_epoch(env, batch_size, model, critics, γ, λ, save_dir):
     obs_spc = env.observation_space
     act_spc = env.action_space
 
@@ -194,7 +194,7 @@ def train_one_epoch(env, batch_size, model, critics, γ, λ):
         if batch.approx_kl() > 1.5 * kl_target:
             print(f"Early stopping at step {i}")
             break
-        opt.minimize(batch.loss, var_list=var_list)
+
 
     train_time = time.time() - train_start_time
     run_time = train_start_time - start_time
@@ -228,11 +228,11 @@ def load_model(model, load_path):
     ckpt.restore(manager.latest_checkpoint)
     print("Restoring from {}".format(manager.latest_checkpoint))
 
-def train(epochs, env, batch_size, model, critics, γ, λ):
+def train(epochs, env, batch_size, model, critics, γ, λ, save_dir):
     for i in range(1, epochs + 1):
         start_time = time.time()
         print('Epoch: ', i)
-        batch_loss = train_one_epoch(env, batch_size, model, critics, γ, λ)
+        batch_loss = train_one_epoch(env, batch_size, model, critics, γ, λ, save_dir)
         now = time.time()
 
         wandb.log({'Epoch': i,
@@ -279,8 +279,6 @@ if __name__ == '__main__':
 
     seeds = args.seed
     n_critics = args.num_critics
-
-    save_dir = args.save_dir
     load_dir = args.load_dir
 
     batch_size = 5000
@@ -306,6 +304,11 @@ if __name__ == '__main__':
         wandb.config.norm_adv = True
         wandb.config.bootstrap = True
         wandb.config.kl_target = kl_target
+
+        if args.save_dir == None:
+            save_dir = f'model/{run_name}'
+        else:
+            save_dir = args.save_dir
 
         #environment creation
         env = gym.make(env_name)
@@ -347,8 +350,5 @@ if __name__ == '__main__':
             test(epochs, env, model)
         else:
             monitor_env = Monitor(env, f"recordings/{run_name}", force=True)
-            train(epochs, monitor_env, batch_size, model, critics, γ, λ)
-            if save_dir==None:
-                save_dir = 'model/'
-                save_model(model, save_dir+env_name)
+            train(epochs, monitor_env, batch_size, model, critics, γ, λ, save_dir)
         wandb.finish()
