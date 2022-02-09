@@ -98,6 +98,18 @@ class Buffer(object):
             self.V_hats = self.V_hats.stack()
             self.gae = self.gae.stack()
 
+    def approx_kl(self):
+        obs, act, logprob = self.obs_buf, self.act_buf, self.prob_buf
+
+        if self.continuous:
+            dist = tfd.MultivariateNormalDiag(model(obs), tf.exp(self.model.log_std))
+        else:
+            dist = tfd.Categorical(logits=model(obs))
+
+        new_logprob = dist.log_prob(act)
+
+        return tf.reduce_mean(logprob - new_logprob)
+
     # @tf.function
     def loss(self):
         eps = 0.1
@@ -177,7 +189,11 @@ def train_one_epoch(env, batch_size, model, critics, γ, λ):
     if act_spc.shape:
         var_list.append(model.log_std)
 
-    for _ in range(80):
+    for i in range(80):
+        # early stopping
+        if batch.approx_kl() > 1.5 * kl_target:
+            print(f"Early stopping at step {i}")
+            break
         opt.minimize(batch.loss, var_list=var_list)
 
     train_time = time.time() - train_start_time
@@ -271,6 +287,8 @@ if __name__ == '__main__':
     γ = .99
     λ = 0.97
 
+    kl_target = 0.01
+
     for seed in seeds:
         run_name = f"ensemble-{n_critics}-{seed}"
         wandb.init(project='pybullet-GC-experiments2', entity='rlexp', reinit=True, name=run_name, monitor_gym=True, save_code=True)
@@ -283,6 +301,7 @@ if __name__ == '__main__':
         wandb.config.seed = seed
         wandb.config.n_critics = n_critics
         wandb.config.norm_adv = True
+        wandb.config.kl_target = kl_target
 
         #environment creation
         env = gym.make(env_name)
