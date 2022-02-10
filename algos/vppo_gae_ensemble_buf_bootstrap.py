@@ -326,7 +326,8 @@ if __name__ == '__main__':
             wandb.config.kl_rollback = False
 
         if args.save_dir == None:
-            save_dir = f'model/{run_name}'
+            os.makedirs("model", exist_ok=True)
+            save_dir = tempfile.mkdtemp(dir='model', prefix=run_name)
         else:
             save_dir = args.save_dir
 
