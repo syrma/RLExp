@@ -172,7 +172,7 @@ def run_one_episode(env, buf):
     return time.time() - critic_start
 
 
-def train_one_epoch(env, batch_size, model, critics, γ, λ, save_dir):
+def train_one_epoch(env, batch_size, model, critics, γ, λ):
     obs_spc = env.observation_space
     act_spc = env.action_space
 
@@ -189,21 +189,12 @@ def train_one_epoch(env, batch_size, model, critics, γ, λ, save_dir):
     if act_spc.shape:
         var_list.append(model.log_std)
 
-    print(wandb.config.kl_rollback)
-
-    if wandb.config.kl_rollback == True:
-        for i in range(80):
-            save_model(model, save_dir)
-            opt.minimize(batch.loss, var_list=var_list)
-            # early stopping + rollback
-            if batch.approx_kl() > 1.5 * kl_target:
-                print(f"Early stopping at step {i}")
-                load_model(model, save_dir)
-                break
-    else:
-        for i in range(80):
-            save_model(model, save_dir)
-            opt.minimize(batch.loss, var_list=var_list)
+    for i in range(80):
+        # early stopping
+        if batch.approx_kl() > 1.5 * kl_target:
+            print(f"Early stopping at step {i}")
+            break
+        opt.minimize(batch.loss, var_list=var_list)
 
     train_time = time.time() - train_start_time
     run_time = train_start_time - start_time
@@ -237,11 +228,11 @@ def load_model(model, load_path):
     ckpt.restore(manager.latest_checkpoint)
     print("Restoring from {}".format(manager.latest_checkpoint))
 
-def train(epochs, env, batch_size, model, critics, γ, λ, save_dir):
+def train(epochs, env, batch_size, model, critics, γ, λ):
     for i in range(1, epochs + 1):
         start_time = time.time()
         print('Epoch: ', i)
-        batch_loss = train_one_epoch(env, batch_size, model, critics, γ, λ, save_dir)
+        batch_loss = train_one_epoch(env, batch_size, model, critics, γ, λ)
         now = time.time()
 
         wandb.log({'Epoch': i,
@@ -273,7 +264,6 @@ first_start_time = time.time()
 if __name__ == '__main__':
     parser = Parser(description='Train or test PPO')
     parser.add_argument('test', nargs='?', help = 'Test a saved or a random model')
-    parser.add_argument('--kl_rollback', nargs='?', help= 'Include early stopping with rollback in the training')
     parser.add_argument('--load_dir', help='Optional: directory of saved model to test or resume training')
     parser.add_argument('--env_name', help='Environment name to use with OpenAI Gym')
     parser.add_argument('--save_dir', help='Optional: directory where the model should be saved')
@@ -313,13 +303,7 @@ if __name__ == '__main__':
         wandb.config.n_critics = n_critics
         wandb.config.norm_adv = True
         wandb.config.bootstrap = True
-
-        if args.kl_rollback:
-            wandb.config.kl_rollback = True
-            wandb.config.kl_target = kl_target
-        else:
-            wandb.config.kl_rollback = False
-
+        wandb.config.kl_target = kl_target
 
         if args.save_dir == None:
             save_dir = f'model/{run_name}'
@@ -366,5 +350,5 @@ if __name__ == '__main__':
             test(epochs, env, model)
         else:
             monitor_env = Monitor(env, f"recordings/{run_name}", force=True)
-            train(epochs, monitor_env, batch_size, model, critics, γ, λ, save_dir)
+            train(epochs, monitor_env, batch_size, model, critics, γ, λ)
         wandb.finish()
