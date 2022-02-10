@@ -189,21 +189,20 @@ def train_one_epoch(env, batch_size, model, critics, γ, λ, save_dir):
     if act_spc.shape:
         var_list.append(model.log_std)
 
-    print(wandb.config.kl_rollback)
+    for i in range(80):
+        save_model(model, save_dir)
+        opt.minimize(batch.loss, var_list=var_list)
 
-    if wandb.config.kl_rollback == True:
-        for i in range(80):
-            save_model(model, save_dir)
-            opt.minimize(batch.loss, var_list=var_list)
-            # early stopping + rollback
-            if batch.approx_kl() > 1.5 * kl_target:
-                print(f"Early stopping at step {i}")
+        # do we want early stopping?
+        if not wandb.config.kl_stop:
+            continue
+
+        if batch.approx_kl() > 1.5 * kl_target:
+            print(f"Early stopping at step {i}")
+            # rollback if asked to
+            if wandb.config.kl_rollback:
                 load_model(model, save_dir)
-                break
-    else:
-        for i in range(80):
-            save_model(model, save_dir)
-            opt.minimize(batch.loss, var_list=var_list)
+            break
 
     train_time = time.time() - train_start_time
     run_time = train_start_time - start_time
@@ -273,7 +272,8 @@ first_start_time = time.time()
 if __name__ == '__main__':
     parser = Parser(description='Train or test PPO')
     parser.add_argument('test', nargs='?', help = 'Test a saved or a random model')
-    parser.add_argument('--kl_rollback', nargs='?', help= 'Include early stopping with rollback in the training')
+    parser.add_argument('--kl_stop', action='store_true', help= 'Early stopping')
+    parser.add_argument('--kl_rollback', action='store_true', help= 'Include early stopping with rollback in the training')
     parser.add_argument('--load_dir', help='Optional: directory of saved model to test or resume training')
     parser.add_argument('--env_name', help='Environment name to use with OpenAI Gym')
     parser.add_argument('--save_dir', help='Optional: directory where the model should be saved')
@@ -302,7 +302,7 @@ if __name__ == '__main__':
 
     for seed in seeds:
         run_name = f"ensemble-{n_critics}-{seed}"
-        wandb.init(project='pybullet-GC-experiments3', entity='rlexp', reinit=True, name=run_name, monitor_gym=True, save_code=True)
+        wandb.init(project='pybullet-GC-experiments4', entity='rlexp', reinit=True, name=run_name, monitor_gym=True, save_code=True)
         wandb.config.env = env_name
         wandb.config.epochs = epochs
         wandb.config.batch_size = batch_size
@@ -314,15 +314,20 @@ if __name__ == '__main__':
         wandb.config.norm_adv = True
         wandb.config.bootstrap = True
 
+        if args.kl_stop or args.kl_rollback:
+            wandb.config.kl_target = kl_target
+            wandb.config.kl_stop = True
+        else:
+            wandb.config.kl_stop = False
+
         if args.kl_rollback:
             wandb.config.kl_rollback = True
-            wandb.config.kl_target = kl_target
         else:
             wandb.config.kl_rollback = False
 
-
         if args.save_dir == None:
-            save_dir = f'model/{run_name}'
+            os.makedirs("model", exist_ok=True)
+            save_dir = tempfile.mkdtemp(dir='model', prefix=run_name)
         else:
             save_dir = args.save_dir
 
