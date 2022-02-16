@@ -8,7 +8,6 @@ import math
 import argparse
 import wandb
 import sys
-from gym.wrappers import Monitor
 import tempfile
 import tensorflow_probability as tfp
 tfd = tfp.distributions
@@ -154,6 +153,8 @@ def run_one_episode(env, buf):
         act, prob = action(buf.model, obs, env)
         new_obs, rew, done, _ = env.step(act.numpy())
 
+        rew = tf.cast(rew, 'float32')
+
         buf.store(obs, act, rew, prob)
         obs = tf.cast(new_obs, obs_dtype)
 
@@ -164,9 +165,6 @@ def run_one_episode(env, buf):
     if done:
         buf.finish_path()
     else:
-        while not done:
-            act, prob = action(buf.model, obs, env)
-            new_obs, rew, done, _ = env.step(act.numpy())
         buf.finish_path(obs)
 
     return time.time() - critic_start
@@ -279,6 +277,7 @@ if __name__ == '__main__':
     parser.add_argument('--save_dir', help='Optional: directory where the model should be saved')
     parser.add_argument('--num_critics', default=3, type=int, help='Number of critics')
     parser.add_argument('--seed', nargs='+', default=[0], type=int, help='Seed')
+    parser.add_argument('--wandb_project_name', default='pybullet-GC-experiments4', help='Project name for Weights & Biases experiment tracking')
 
     args = parser.parse_args()
 
@@ -291,8 +290,8 @@ if __name__ == '__main__':
     n_critics = args.num_critics
     load_dir = args.load_dir
 
-    batch_size = 5000
-    epochs = 400
+    batch_size = 10000
+    epochs = 200
     learning_rate = 3e-4
     opt = tf.optimizers.Adam(learning_rate)
     γ = .99
@@ -301,8 +300,8 @@ if __name__ == '__main__':
     kl_target = 0.01
 
     for seed in seeds:
-        run_name = f"ensemble-{n_critics}-{seed}"
-        wandb.init(project='pybullet-GC-experiments4', entity='rlexp', reinit=True, name=run_name, monitor_gym=True, save_code=True)
+        run_name = f"ensemble-{n_critics}-{seed}nb"
+        wandb.init(project=args.wandb_project_name, entity='rlexp', reinit=True, name=run_name, monitor_gym=True, save_code=True)
         wandb.config.env = env_name
         wandb.config.epochs = epochs
         wandb.config.batch_size = batch_size
@@ -313,6 +312,8 @@ if __name__ == '__main__':
         wandb.config.n_critics = n_critics
         wandb.config.norm_adv = True
         wandb.config.bootstrap = True
+        wandb.config.norm_rew = True
+        wandb.config.norm_obs = True
 
         if args.kl_stop or args.kl_rollback:
             wandb.config.kl_target = kl_target
@@ -326,8 +327,8 @@ if __name__ == '__main__':
             wandb.config.kl_rollback = False
 
         if args.save_dir == None:
-            os.makedirs("model", exist_ok=True)
-            save_dir = tempfile.mkdtemp(dir='model', prefix=run_name)
+            os.makedirs("saves", exist_ok=True)
+            save_dir = tempfile.mkdtemp(dir='saves', prefix=run_name)
         else:
             save_dir = args.save_dir
 
@@ -370,6 +371,11 @@ if __name__ == '__main__':
             env.render()
             test(epochs, env, model)
         else:
-            monitor_env = Monitor(env, f"recordings/{run_name}", force=True)
-            train(epochs, monitor_env, batch_size, model, critics, γ, λ, save_dir)
+            env = gym.wrappers.RecordVideo(env, save_dir)
+            env = gym.wrappers.ClipAction(env)
+            env = gym.wrappers.NormalizeObservation(env)
+            env = gym.wrappers.TransformObservation(env, lambda obs: tf.clip_by_value(obs, -10, 10))
+            env = gym.wrappers.NormalizeReward(env)
+            env = gym.wrappers.TransformReward(env, lambda reward: tf.clip_by_value(reward, -10, 10))
+            train(epochs, env, batch_size, model, critics, γ, λ, save_dir)
         wandb.finish()

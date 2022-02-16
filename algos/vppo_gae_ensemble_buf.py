@@ -8,7 +8,6 @@ import math
 import argparse
 import wandb
 import sys
-from gym.wrappers import Monitor
 import tempfile
 import tensorflow_probability as tfp
 tfd = tfp.distributions
@@ -153,6 +152,8 @@ def run_one_episode(env, buf):
     for i in range(buf.ptr, buf.size):
         act, prob = action(buf.model, obs, env)
         new_obs, rew, done, _ = env.step(act.numpy())
+        
+        rew = tf.cast(rew, 'float32')
 
         buf.store(obs, act, rew, prob)
         obs = tf.cast(new_obs, obs_dtype)
@@ -164,15 +165,12 @@ def run_one_episode(env, buf):
     if done:
         buf.finish_path()
     else:
-        while not done:
-            act, prob = action(buf.model, obs, env)
-            new_obs, rew, done, _ = env.step(act.numpy())
         buf.finish_path(obs)
 
     return time.time() - critic_start
 
 
-def train_one_epoch(env, batch_size, model, critics, γ, λ):
+def train_one_epoch(env, batch_size, model, critics, γ, λ, save_dir):
     obs_spc = env.observation_space
     act_spc = env.action_space
 
@@ -190,11 +188,19 @@ def train_one_epoch(env, batch_size, model, critics, γ, λ):
         var_list.append(model.log_std)
 
     for i in range(80):
-        # early stopping
+        save_model(model, save_dir)
+        opt.minimize(batch.loss, var_list=var_list)
+
+        # do we want early stopping?
+        if not wandb.config.kl_stop:
+            continue
+
         if batch.approx_kl() > 1.5 * kl_target:
             print(f"Early stopping at step {i}")
+            # rollback if asked to
+            if wandb.config.kl_rollback:
+                load_model(model, save_dir)
             break
-        opt.minimize(batch.loss, var_list=var_list)
 
     train_time = time.time() - train_start_time
     run_time = train_start_time - start_time
@@ -225,11 +231,11 @@ def load_model(model, load_path):
     ckpt.restore(manager.latest_checkpoint)
     print("Restoring from {}".format(manager.latest_checkpoint))
 
-def train(epochs, env, batch_size, model, critics, γ, λ):
+def train(epochs, env, batch_size, model, critics, γ, λ, save_dir):
     for i in range(1, epochs + 1):
         start_time = time.time()
         print('Epoch: ', i)
-        batch_loss = train_one_epoch(env, batch_size, model, critics, γ, λ)
+        batch_loss = train_one_epoch(env, batch_size, model, critics, γ, λ, save_dir)
         now = time.time()
 
         wandb.log({'Epoch': i,
@@ -261,11 +267,14 @@ first_start_time = time.time()
 if __name__ == '__main__':
     parser = Parser(description='Train or test PPO')
     parser.add_argument('test', nargs='?', help = 'Test a saved or a random model')
+    parser.add_argument('--kl_stop', action='store_true', help= 'Early stopping')
+    parser.add_argument('--kl_rollback', action='store_true', help= 'Include early stopping with rollback in the training')
     parser.add_argument('--load_dir', help='Optional: directory of saved model to test or resume training')
     parser.add_argument('--env_name', help='Environment name to use with OpenAI Gym')
     parser.add_argument('--save_dir', help='Optional: directory where the model should be saved')
     parser.add_argument('--num_critics', default=3, type=int, help='Number of critics')
     parser.add_argument('--seed', nargs='+', default=[0], type=int, help='Seed')
+    parser.add_argument('--wandb_project_name', default='pybullet-GC-experiments4', help='Project name for Weights & Biases experiment tracking')
 
     args = parser.parse_args()
 
@@ -280,8 +289,8 @@ if __name__ == '__main__':
     save_dir = args.save_dir
     load_dir = args.load_dir
 
-    batch_size = 5000
-    epochs = 400
+    batch_size = 10000
+    epochs = 200
     learning_rate = 3e-4
     opt = tf.optimizers.Adam(learning_rate)
     γ = .99
@@ -291,7 +300,7 @@ if __name__ == '__main__':
 
     for seed in seeds:
         run_name = f"ensemble-{n_critics}-{seed}"
-        wandb.init(project='pybullet-GC-experiments2', entity='rlexp', reinit=True, name=run_name, monitor_gym=True, save_code=True)
+        wandb.init(project=args.wandb_project_name, entity='rlexp', reinit=True, name=run_name, monitor_gym=True, save_code=True)
         wandb.config.env = env_name
         wandb.config.epochs = epochs
         wandb.config.batch_size = batch_size
@@ -301,7 +310,26 @@ if __name__ == '__main__':
         wandb.config.seed = seed
         wandb.config.n_critics = n_critics
         wandb.config.norm_adv = True
-        wandb.config.kl_target = kl_target
+        wandb.config.norm_rew = True
+        wandb.config.norm_obs = True
+
+        if args.kl_stop or args.kl_rollback:
+            wandb.config.kl_target = kl_target
+            wandb.config.kl_stop = True
+        else:
+            wandb.config.kl_stop = False	
+
+        if args.kl_rollback:
+            wandb.config.kl_rollback = True
+        else:
+            wandb.config.kl_rollback = False
+
+        if args.save_dir == None:
+            os.makedirs("saves", exist_ok=True)
+            save_dir = tempfile.mkdtemp(dir='saves', prefix=run_name)
+        else:
+            save_dir = args.save_dir
+
 
         #environment creation
         env = gym.make(env_name)
@@ -342,9 +370,11 @@ if __name__ == '__main__':
             env.render()
             test(epochs, env, model)
         else:
-            monitor_env = Monitor(env, f"recordings/{run_name}", force=True)
-            train(epochs, monitor_env, batch_size, model, critics, γ, λ)
-            if save_dir==None:
-                save_dir = 'model/'
-                save_model(model, save_dir+env_name)
+            env = gym.wrappers.RecordVideo(env, save_dir)
+            env = gym.wrappers.ClipAction(env)
+            env = gym.wrappers.NormalizeObservation(env)
+            env = gym.wrappers.TransformObservation(env, lambda obs: tf.clip_by_value(obs, -10, 10))
+            env = gym.wrappers.NormalizeReward(env)
+            env = gym.wrappers.TransformReward(env, lambda reward: tf.clip_by_value(reward, -10, 10))
+            train(epochs, env, batch_size, model, critics, γ, λ, save_dir)
         wandb.finish()
