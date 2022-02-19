@@ -313,7 +313,7 @@ if __name__ == '__main__':
         wandb.config.norm_adv = True
         wandb.config.bootstrap = True
         wandb.config.norm_rew = True
-        wandb.config.norm_obs = True
+        wandb.config.norm_obs = False
 
         if args.kl_stop or args.kl_rollback:
             wandb.config.kl_target = kl_target
@@ -373,8 +373,8 @@ if __name__ == '__main__':
         else:
             env = gym.wrappers.RecordVideo(env, save_dir)
             env = gym.wrappers.ClipAction(env)
-            env = gym.wrappers.NormalizeObservation(env)
-            env = gym.wrappers.TransformObservation(env, lambda obs: tf.clip_by_value(obs, -10, 10))
+#            env = gym.wrappers.NormalizeObservation(env)
+#            env = gym.wrappers.TransformObservation(env, lambda obs: tf.clip_by_value(obs, -10, 10))
             env = gym.wrappers.NormalizeReward(env)
             env = gym.wrappers.TransformReward(env, lambda reward: tf.clip_by_value(reward, -10, 10))
             train(epochs, env, batch_size, model, critics, γ, λ, save_dir)
