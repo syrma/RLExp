@@ -336,6 +336,12 @@ if __name__ == '__main__':
         env = gym.make(env_name)
         obs_spc = env.observation_space
         act_spc = env.action_space
+        if act_spc.shape:
+            env = gym.wrappers.ClipAction(env)
+            #            env = gym.wrappers.NormalizeObservation(env)
+            #            env = gym.wrappers.TransformObservation(env, lambda obs: tf.clip_by_value(obs, -10, 10))
+            env = gym.wrappers.NormalizeReward(env)
+            env = gym.wrappers.TransformReward(env, lambda reward: tf.clip_by_value(reward, -10, 10))
 
         #seeding
         tf.random.set_seed(seed)
@@ -371,11 +377,6 @@ if __name__ == '__main__':
             env.render()
             test(epochs, env, model)
         else:
-            env = gym.wrappers.RecordVideo(env, save_dir)
-            env = gym.wrappers.ClipAction(env)
-#            env = gym.wrappers.NormalizeObservation(env)
-#            env = gym.wrappers.TransformObservation(env, lambda obs: tf.clip_by_value(obs, -10, 10))
-            env = gym.wrappers.NormalizeReward(env)
-            env = gym.wrappers.TransformReward(env, lambda reward: tf.clip_by_value(reward, -10, 10))
+#            env = gym.wrappers.RecordVideo(env, save_dir)
             train(epochs, env, batch_size, model, critics, γ, λ, save_dir)
         wandb.finish()

@@ -337,8 +337,8 @@ if __name__ == '__main__':
         act_spc = env.action_space
         if act_spc.shape:
             env = gym.wrappers.ClipAction(env)
-            env = gym.wrappers.NormalizeObservation(env)
-            env = gym.wrappers.TransformObservation(env, lambda obs: tf.clip_by_value(obs, -10, 10))
+            #env = gym.wrappers.NormalizeObservation(env)
+            #env = gym.wrappers.TransformObservation(env, lambda obs: tf.clip_by_value(obs, -10, 10))
             env = gym.wrappers.NormalizeReward(env)
             env = gym.wrappers.TransformReward(env, lambda reward: tf.clip_by_value(reward, -10, 10))
 
