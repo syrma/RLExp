@@ -12,6 +12,49 @@ import tempfile
 import tensorflow_probability as tfp
 tfd = tfp.distributions
 
+import numpy as np
+
+# taken from https://github.com/openai/baselines/blob/master/baselines/common/vec_env/vec_normalize.py
+class RunningMeanStd:
+    """Tracks the mean, variance and count of values."""
+
+    # https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Parallel_algorithm
+    def __init__(self, epsilon=1e-4, shape=()):
+        """Tracks the mean, variance and count of values."""
+        self.mean = np.zeros(shape, "float64")
+        self.var = np.ones(shape, "float64")
+        self.count = epsilon
+
+    def update(self, x):
+        """Updates the mean, var and count from a batch of samples."""
+        batch_mean = np.mean(x, axis=0)
+        batch_var = np.var(x, axis=0)
+        batch_count = x.shape[0]
+        self.update_from_moments(batch_mean, batch_var, batch_count)
+
+    def update_from_moments(self, batch_mean, batch_var, batch_count):
+        """Updates from batch mean, variance and count moments."""
+        self.mean, self.var, self.count = update_mean_var_count_from_moments(
+            self.mean, self.var, self.count, batch_mean, batch_var, batch_count
+        )
+
+def update_mean_var_count_from_moments(
+    mean, var, count, batch_mean, batch_var, batch_count
+):
+    """Updates the mean, var and count using the previous mean, var, count and batch values."""
+    delta = batch_mean - mean
+    tot_count = count + batch_count
+
+    new_mean = mean + delta * batch_count / tot_count
+    m_a = var * count
+    m_b = batch_var * batch_count
+    M2 = m_a + m_b + np.square(delta) * count * batch_count / tot_count
+    new_var = M2 / tot_count
+    new_count = tot_count
+
+    return new_mean, new_var, new_count
+
+
 class Buffer(object):
     def __init__(self, obs_spc, act_spc, model, critics, size, gam=0.99, lam=0.97):
         self.ptr = 0
@@ -28,6 +71,7 @@ class Buffer(object):
         self.prob_buf = tf.TensorArray(tf.float32, size)
 
         self.rets = []
+        self.ret_rms = RunningMeanStd(shape=())
         self.lens = []
 
         self.V_hats = tf.TensorArray(tf.float32, size)
@@ -54,20 +98,24 @@ class Buffer(object):
         else:
             predictions = [tf.squeeze(value_model((tf.expand_dims(last_obs, 0)))) for value_model in self.critics]
             last_val = tf.math.reduce_mean(predictions)
-        #print("last val:", last_val)
 
         # last_val = tf.squeeze(self.value_model(tf.expand_dims(last_obs, 0))) if last_obs is not None else 0
 
         length = self.ptr - self.last_idx
-        ret = tf.reduce_sum(self.rew_buf.gather(current_episode)) + last_val
+        ep_rew = self.rew_buf.gather(current_episode)
+        ret = tf.reduce_sum(ep_rew) + last_val
+        self.lens.append(length)
+        self.rets.append(ret)
+
+        #(attempt at) scaling the rewards
+        self.ret_rms.update(np.array(self.rets))
+        ep_rew = ep_rew / tf.sqrt(tf.cast(self.ret_rms.var, tf.float32) + 1e-8)
 
         # v_hats = discounted cumulative sum
-        ep_rew = self.rew_buf.gather(current_episode)
         discounts = tf.math.cumprod(tf.fill(ep_rew.shape, self.gam), exclusive=True)
         v_hats = tf.math.cumsum(discounts * ep_rew, reverse=True)
 
-        self.lens.append(length)
-        self.rets.append(ret)
+
         self.V_hats = self.V_hats.scatter(current_episode, v_hats)
 
         #Vs = tf.squeeze(value_model(self.obs_buf.gather(current_episode)), axis=1)
@@ -337,10 +385,10 @@ if __name__ == '__main__':
         act_spc = env.action_space
         if act_spc.shape:
             env = gym.wrappers.ClipAction(env)
-            #env = gym.wrappers.NormalizeObservation(env)
-            #env = gym.wrappers.TransformObservation(env, lambda obs: tf.clip_by_value(obs, -10, 10))
-            env = gym.wrappers.NormalizeReward(env)
-            env = gym.wrappers.TransformReward(env, lambda reward: tf.clip_by_value(reward, -10, 10))
+        #env = gym.wrappers.NormalizeObservation(env)
+        #env = gym.wrappers.TransformObservation(env, lambda obs: tf.clip_by_value(obs, -10, 10))
+        #env = gym.wrappers.NormalizeReward(env)
+        #env = gym.wrappers.TransformReward(env, lambda reward: tf.clip_by_value(reward, -10, 10))
 
         #seeding
         tf.random.set_seed(seed)
@@ -376,6 +424,6 @@ if __name__ == '__main__':
             env.render()
             test(epochs, env, model)
         else:
-            #env = gym.wrappers.RecordVideo(env, save_dir)
+            env = gym.wrappers.RecordVideo(env, save_dir)
             train(epochs, env, batch_size, model, critics, γ, λ, save_dir)
         wandb.finish()
