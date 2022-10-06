@@ -257,6 +257,10 @@ def train_one_epoch(env, batch_size, model, critics, γ, λ, save_dir):
     print('AvgEpRet:', tf.reduce_mean(batch.rets).numpy())
 
     for i in range(len(critics)):
+        bootstrap_value = 0.9 if wandb.config.bootstrap else 1
+        mask = tf.random.uniform([batch.size]) < bootstrap_value
+        masked_obs = tf.boolean_mask(batch.obs_buf, mask)
+        masked_vhats = tf.boolean_mask(batch.V_hats, mask)
         hist = critics[i].fit(batch.obs_buf.numpy(), batch.V_hats.numpy(), epochs=80, steps_per_epoch=1, verbose=0)
         wandb.log({f'LossV{i}': tf.reduce_mean(hist.history['loss']).numpy()}, commit=False)
 
@@ -317,6 +321,8 @@ if __name__ == '__main__':
     parser.add_argument('test', nargs='?', help = 'Test a saved or a random model')
     parser.add_argument('--kl_stop', action='store_true', help= 'Early stopping')
     parser.add_argument('--kl_rollback', action='store_true', help= 'Include early stopping with rollback in the training')
+    parser.add_argument('--bootstrap', action='store_true', help='Include bootstrapping when fitting the critic networks')
+    parser.add_argument('--norm_rew', action='store_true', help= 'Include Reward Scaling optimization')
     parser.add_argument('--load_dir', help='Optional: directory of saved model to test or resume training')
     parser.add_argument('--env_name', help='Environment name to use with OpenAI Gym')
     parser.add_argument('--save_dir', help='Optional: directory where the model should be saved')
@@ -358,9 +364,18 @@ if __name__ == '__main__':
         wandb.config.seed = seed
         wandb.config.n_critics = n_critics
         wandb.config.norm_adv = True
-        wandb.config.norm_rew = True
         wandb.config.norm_obs = False
-    
+
+        if args.norm_rew:
+            wandb.config.norm_rew = True
+        else:
+            wandb.config.norm_rew = False
+
+        if args.bootstrap:
+            wandb.config.bootstrap = True
+        else:
+            wandb.config.bootstrap = False
+
         if args.kl_stop or args.kl_rollback:
             wandb.config.kl_target = kl_target
             wandb.config.kl_stop = True
@@ -424,6 +439,6 @@ if __name__ == '__main__':
             env.render()
             test(epochs, env, model)
         else:
-            env = gym.wrappers.RecordVideo(env, save_dir)
+            #env = gym.wrappers.RecordVideo(env, save_dir)
             train(epochs, env, batch_size, model, critics, γ, λ, save_dir)
         wandb.finish()
