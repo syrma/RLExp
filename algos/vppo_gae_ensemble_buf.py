@@ -1,18 +1,18 @@
 import os
-
-import tensorflow as tf
-import gym
-import pybullet_envs
 import time
-import math
 import argparse
 import wandb
 import sys
 import tempfile
-import tensorflow_probability as tfp
-tfd = tfp.distributions
 
 import numpy as np
+import tensorflow as tf
+import gym
+import pybullet_envs
+import tensorflow_probability as tfp
+
+tfd = tfp.distributions
+
 
 # taken from https://github.com/openai/baselines/blob/master/baselines/common/vec_env/vec_normalize.py
 class RunningMeanStd:
@@ -38,8 +38,9 @@ class RunningMeanStd:
             self.mean, self.var, self.count, batch_mean, batch_var, batch_count
         )
 
+
 def update_mean_var_count_from_moments(
-    mean, var, count, batch_mean, batch_var, batch_count
+        mean, var, count, batch_mean, batch_var, batch_count
 ):
     """Updates the mean, var and count using the previous mean, var, count and batch values."""
     delta = batch_mean - mean
@@ -92,7 +93,7 @@ class Buffer(object):
     def finish_path(self, last_obs=None):
         current_episode = tf.range(self.last_idx, self.ptr)
 
-        #bootstrapping the remaining values if the episode was interrupted
+        # bootstrapping the remaining values if the episode was interrupted
         if last_obs == None:
             last_val = 0
         else:
@@ -107,20 +108,21 @@ class Buffer(object):
         self.lens.append(length)
         self.rets.append(ret)
 
-        #(attempt at) scaling the rewards
-        self.ret_rms.update(np.array(self.rets))
-        ep_rew = ep_rew / tf.sqrt(tf.cast(self.ret_rms.var, tf.float32) + 1e-8)
+        # (attempt at) scaling the rewards
+        if wandb.config.norm_rew:
+            self.ret_rms.update(np.array(self.rets))
+            ep_rew = ep_rew / tf.sqrt(tf.cast(self.ret_rms.var, tf.float32) + 1e-8)
 
         # v_hats = discounted cumulative sum
         discounts = tf.math.cumprod(tf.fill(ep_rew.shape, self.gam), exclusive=True)
         v_hats = tf.math.cumsum(discounts * ep_rew, reverse=True)
 
-
         self.V_hats = self.V_hats.scatter(current_episode, v_hats)
 
-        #Vs = tf.squeeze(value_model(self.obs_buf.gather(current_episode)), axis=1)
+        # Vs = tf.squeeze(value_model(self.obs_buf.gather(current_episode)), axis=1)
 
-        predictions = [tf.squeeze(value_model(self.obs_buf.gather(current_episode)), axis=1) for value_model in self.critics]
+        predictions = [tf.squeeze(value_model(self.obs_buf.gather(current_episode)), axis=1) for value_model in
+                       self.critics]
         Vs = tf.math.reduce_mean(predictions, axis=0)
         Vsp1 = tf.concat([Vs[1:], [last_val]], axis=0)
         deltas = self.rew_buf.gather(current_episode) + self.gam * Vsp1 - Vs
@@ -129,7 +131,7 @@ class Buffer(object):
         discounts = tf.math.cumprod(tf.fill(deltas.shape, self.gam * self.lam), exclusive=True)
         gae = tf.math.cumsum(discounts * deltas, reverse=True)
 
-        #Normalise the advantage
+        # Normalise the advantage
         gae = (gae - tf.math.reduce_mean(gae)) / (tf.math.reduce_std(gae) + 1e-8)
 
         self.gae = self.gae.scatter(current_episode, gae)
@@ -200,7 +202,7 @@ def run_one_episode(env, buf):
     for i in range(buf.ptr, buf.size):
         act, prob = action(buf.model, obs, env)
         new_obs, rew, done, _ = env.step(act.numpy())
-        
+
         rew = tf.cast(rew, 'float32')
 
         buf.store(obs, act, rew, prob)
@@ -272,16 +274,19 @@ def train_one_epoch(env, batch_size, model, critics, γ, λ, save_dir):
 
     return batch.rets, batch.lens
 
+
 def save_model(model, save_path):
     ckpt = tf.train.Checkpoint(model=model)
     manager = tf.train.CheckpointManager(ckpt, save_path, max_to_keep=None)
     manager.save()
+
 
 def load_model(model, load_path):
     ckpt = tf.train.Checkpoint(model=model)
     manager = tf.train.CheckpointManager(ckpt, load_path, max_to_keep=None)
     ckpt.restore(manager.latest_checkpoint)
     print("Restoring from {}".format(manager.latest_checkpoint))
+
 
 def train(epochs, env, batch_size, model, critics, γ, λ, save_dir):
     for i in range(1, epochs + 1):
@@ -295,8 +300,9 @@ def train(epochs, env, batch_size, model, critics, γ, λ, save_dir):
                    'LossPi': batch_loss,
                    'Time': now - first_start_time})
 
+
 def test(epochs, env, model):
-    for i in range(1, epochs+1):
+    for i in range(1, epochs + 1):
 
         obs, done = env.reset(), False
         episode_rew = 0
@@ -307,35 +313,41 @@ def test(epochs, env, model):
             episode_rew += rew
         print("Episode reward", episode_rew)
 
+
 class Parser(argparse.ArgumentParser):
     def error(self, message):
         sys.stderr.write('error: %s\n' % message)
         self.print_help()
         sys.exit(2)
 
+
 first_start_time = time.time()
 # training loop
 
 if __name__ == '__main__':
     parser = Parser(description='Train or test PPO')
-    parser.add_argument('test', nargs='?', help = 'Test a saved or a random model')
-    parser.add_argument('--kl_stop', action='store_true', help= 'Early stopping')
-    parser.add_argument('--kl_rollback', action='store_true', help= 'Include early stopping with rollback in the training')
-    parser.add_argument('--bootstrap', action='store_true', help='Include bootstrapping when fitting the critic networks')
-    parser.add_argument('--norm_rew', action='store_true', help= 'Include Reward Scaling optimization')
+    parser.add_argument('test', nargs='?', help='Test a saved or a random model')
+    parser.add_argument('--kl_stop', action='store_true', help='Early stopping')
+    parser.add_argument('--kl_rollback', action='store_true',
+                        help='Include early stopping with rollback in the training')
+    parser.add_argument('--bootstrap', action='store_true',
+                        help='Include bootstrapping when fitting the critic networks')
+    parser.add_argument('--norm_rew', action='store_true', help='Include Reward Scaling optimization')
+    parser.add_argument('--norm_obs', action='store_true', help='Include Observation Normalization optimization')
     parser.add_argument('--load_dir', help='Optional: directory of saved model to test or resume training')
     parser.add_argument('--env_name', help='Environment name to use with OpenAI Gym')
     parser.add_argument('--save_dir', help='Optional: directory where the model should be saved')
     parser.add_argument('--num_critics', default=3, type=int, help='Number of critics')
     parser.add_argument('--seed', nargs='+', default=[0], type=int, help='Seed')
-    parser.add_argument('--wandb_project_name', default='pybullet-GC-experiments4', help='Project name for Weights & Biases experiment tracking')
+    parser.add_argument('--wandb_project_name', default='pybullet-GC-experiments4',
+                        help='Project name for Weights & Biases experiment tracking')
 
     args = parser.parse_args()
 
     env_name = args.env_name
-    if(not env_name):
-        #parser.error("No env_name provided.")
-        env_name="CartPole-v0"
+    if (not env_name):
+        # parser.error("No env_name provided.")
+        env_name = "CartPole-v0"
 
     seeds = args.seed
     n_critics = args.num_critics
@@ -354,7 +366,8 @@ if __name__ == '__main__':
 
     for seed in seeds:
         run_name = f"ensemble-{n_critics}-{seed}"
-        wandb.init(project=args.wandb_project_name, entity='rlexp', reinit=True, name=run_name, monitor_gym=True, save_code=True)
+        wandb.init(project=args.wandb_project_name, entity='rlexp', reinit=True, name=run_name, monitor_gym=True,
+                   save_code=True)
         wandb.config.env = env_name
         wandb.config.epochs = epochs
         wandb.config.batch_size = batch_size
@@ -364,23 +377,14 @@ if __name__ == '__main__':
         wandb.config.seed = seed
         wandb.config.n_critics = n_critics
         wandb.config.norm_adv = True
-        wandb.config.norm_obs = False
-
-        if args.norm_rew:
-            wandb.config.norm_rew = True
-        else:
-            wandb.config.norm_rew = False
-
-        if args.bootstrap:
-            wandb.config.bootstrap = True
-        else:
-            wandb.config.bootstrap = False
+        wandb.config.norm_rew = True if args.norm_rew else False
+        wandb.config.bootstrap = True if args.bootstrap else False
 
         if args.kl_stop or args.kl_rollback:
             wandb.config.kl_target = kl_target
             wandb.config.kl_stop = True
         else:
-            wandb.config.kl_stop = False	
+            wandb.config.kl_stop = False
 
         if args.kl_rollback:
             wandb.config.kl_rollback = True
@@ -393,19 +397,23 @@ if __name__ == '__main__':
         else:
             save_dir = args.save_dir
 
-
-        #environment creation
+        # environment creation
         env = gym.make(env_name)
         obs_spc = env.observation_space
         act_spc = env.action_space
         if act_spc.shape:
             env = gym.wrappers.ClipAction(env)
-        #env = gym.wrappers.NormalizeObservation(env)
-        #env = gym.wrappers.TransformObservation(env, lambda obs: tf.clip_by_value(obs, -10, 10))
-        #env = gym.wrappers.NormalizeReward(env)
-        #env = gym.wrappers.TransformReward(env, lambda reward: tf.clip_by_value(reward, -10, 10))
 
-        #seeding
+        if args.norm_obs:
+            wandb.config.norm_obs = True
+            env = gym.wrappers.NormalizeObservation(env)
+            env = gym.wrappers.TransformObservation(env, lambda obs: tf.clip_by_value(obs, -10, 10))
+            # env = gym.wrappers.NormalizeReward(env)
+            # env = gym.wrappers.TransformReward(env, lambda reward: tf.clip_by_value(reward, -10, 10))
+        else:
+            wandb.config.norm_obs = False
+
+        # seeding
         tf.random.set_seed(seed)
         env.seed(seed)
         act_spc.seed(seed)
@@ -433,12 +441,12 @@ if __name__ == '__main__':
             critics.append(value_model)
 
         if load_dir:
-            load_model(model, load_dir +'/'+ env_name)
+            load_model(model, load_dir + '/' + env_name)
 
         if args.test != None:
             env.render()
             test(epochs, env, model)
         else:
-            #env = gym.wrappers.RecordVideo(env, save_dir)
+            # env = gym.wrappers.RecordVideo(env, save_dir)
             train(epochs, env, batch_size, model, critics, γ, λ, save_dir)
         wandb.finish()
