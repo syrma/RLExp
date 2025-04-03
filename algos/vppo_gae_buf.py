@@ -1,4 +1,5 @@
 import tensorflow as tf
+import keras
 import gym
 import pybullet_envs
 import time
@@ -250,7 +251,7 @@ if __name__ == '__main__':
     batch_size = 5000
     epochs = 200
     learning_rate = 3e-4
-    opt = tf.optimizers.Adam(learning_rate)
+    opt = keras.optimizers.Adam(learning_rate)
     γ = .99
     λ = 0.97
 
@@ -269,19 +270,19 @@ if __name__ == '__main__':
         act_spc = env.action_space
 
         # policy/actor model
-        model = tf.keras.models.Sequential([
-            tf.keras.layers.Dense(120, activation='relu', input_shape=obs_spc.shape),
-            tf.keras.layers.Dense(84, activation='relu'),
-            tf.keras.layers.Dense(act_spc.shape[0] if act_spc.shape else act_spc.n)
+        model = keras.models.Sequential([
+            keras.layers.Dense(120, activation='relu', input_shape=obs_spc.shape),
+            keras.layers.Dense(84, activation='relu'),
+            keras.layers.Dense(act_spc.shape[0] if act_spc.shape else act_spc.n)
         ])
         if act_spc.shape:
             model.log_std = tf.Variable(tf.fill(env.action_space.shape, -0.5))
         model.summary()
 
         # value/critic model
-        value_model = tf.keras.models.Sequential([
-            tf.keras.layers.Dense(64, activation='relu', input_shape=obs_spc.shape),
-            tf.keras.layers.Dense(1)
+        value_model = keras.models.Sequential([
+            keras.layers.Dense(64, activation='relu', input_shape=obs_spc.shape),
+            keras.layers.Dense(1)
         ])
         value_model.compile('adam', loss='MSE')
         value_model.summary()
