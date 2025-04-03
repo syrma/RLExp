@@ -1,7 +1,6 @@
 import tensorflow as tf
 import tensorflow_probability as tfp
 tfd = tfp.distributions
-from gym.wrappers import Monitor
 import gym
 import pybullet_envs
 import time
@@ -138,7 +137,11 @@ def train_one_epoch(env, batch_size, model, value_model, γ, λ):
     if act_spc.shape:
         var_list.append(model.log_std)
 
-    opt.minimize(batch.loss, var_list=var_list)
+    with tf.GradientTape() as tape:
+        loss = batch.loss()
+
+    grads = tape.gradient(loss, var_list)
+    opt.apply(grads, trainable_variables=var_list)
 
     train_time = time.time() - train_start_time
     run_time = train_start_time - start_time
@@ -191,7 +194,7 @@ if __name__=="__main__":
     epochs = 100
     batch_size = 5000
     learning_rate = 1e-2
-    opt = tf.optimizers.Adam(learning_rate)
+    opt = tf.keras.optimizers.Adam(learning_rate)
     γ = .99
     λ = 0.97
 
@@ -224,7 +227,6 @@ if __name__=="__main__":
         value_model.summary()
 
         with tempfile.TemporaryDirectory(prefix='recordings', dir='.') as recordings:
-            monitor_env = Monitor(env, recordings, force=True)
             train(epochs, env, batch_size, model, value_model, γ, λ)
 
         wandb.finish()

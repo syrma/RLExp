@@ -1,15 +1,10 @@
-import os
-
 import tensorflow as tf
 import gym
 import pybullet_envs
 import time
-import math
 import argparse
 import wandb
 import sys
-from gym.wrappers import Monitor
-import tempfile
 import tensorflow_probability as tfp
 tfd = tfp.distributions
 
@@ -166,7 +161,11 @@ def train_one_epoch(env, batch_size, model, value_model, γ, λ):
         var_list.append(model.log_std)
 
     for _ in range(80):
-        opt.minimize(batch.loss, var_list=var_list)
+        with tf.GradientTape() as tape:
+            loss = batch.loss()
+        grads = tape.gradient(loss, var_list)
+        opt.apply(grads, trainable_variables=var_list)
+
     hist = value_model.fit(batch.obs_buf.numpy(), batch.V_hats.numpy(), epochs=80, steps_per_epoch=1, verbose=0)
 
     train_time = time.time() - train_start_time
@@ -294,8 +293,7 @@ if __name__ == '__main__':
             env.render()
             test(epochs, env, model)
         else:
-            monitor_env = Monitor(env, 'recordings', force=True)
-            train(epochs, monitor_env, batch_size, model, value_model, γ, λ)
+            train(epochs, env, batch_size, model, value_model, γ, λ)
             if save_dir==None:
                 save_dir = 'model/'
                 save_model(model, save_dir+env_name)
