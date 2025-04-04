@@ -107,7 +107,7 @@ def action(model, obs, env):
     if env.action_space.shape:
         dist = tfd.MultivariateNormalDiag(est, tf.exp(model.log_std))
     else:
-        dist = tfd.Categorical(logits=est, dtype=env.action_space.dtype)
+        dist = tfd.Categorical(logits=est)
 
     action = dist.sample()
     logprob = tf.reduce_sum(dist.log_prob(action))
@@ -117,6 +117,7 @@ def action(model, obs, env):
 
 def run_one_episode(env, buf):
     obs_dtype = env.observation_space.dtype
+    act_dtype = env.action_space.dtype
 
     obs = env.reset()
     obs = tf.cast(obs, obs_dtype)
@@ -124,6 +125,7 @@ def run_one_episode(env, buf):
 
     for i in range(buf.ptr, buf.size):
         act, prob = action(buf.model, obs, env)
+        act = tf.cast(act, act_dtype)
         new_obs, rew, done, _ = env.step(act.numpy())
 
         buf.store(obs, act, rew, prob)
