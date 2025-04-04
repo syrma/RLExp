@@ -1,15 +1,11 @@
-import os
-
 import tensorflow as tf
+import keras
 import gym
 import pybullet_envs
 import time
-import math
 import argparse
 import wandb
 import sys
-from gym.wrappers import Monitor
-import tempfile
 import tensorflow_probability as tfp
 tfd = tfp.distributions
 
@@ -86,48 +82,17 @@ class Buffer(object):
             self.V_hats = self.V_hats.stack()
             self.gae = self.gae.stack()
 
-    # @tf.function
-    def loss(self):
-        eps = 0.1
-        obs, act, adv, logprob = self.obs_buf, self.act_buf, self.gae, self.prob_buf
-
-        if self.continuous:
-            dist = tfd.MultivariateNormalDiag(model(obs), tf.exp(self.model.log_std))
-        else:
-            dist = tfd.Categorical(logits=model(obs))
-
-        new_logprob = dist.log_prob(act)
-
-        mask = tf.cast(adv >= 0, tf.float32)
-        epsilon_clip = mask * (1 + eps) + (1 - mask) * (1 - eps)
-        ratio = tf.exp(new_logprob - logprob)
-
-        return -tf.reduce_mean(tf.minimum(ratio * adv, epsilon_clip * adv))
-
-
-@tf.function
-def action(model, obs, env):
-    est = tf.squeeze(model(tf.expand_dims(obs, 0)), axis=0)
-    if env.action_space.shape:
-        dist = tfd.MultivariateNormalDiag(est, tf.exp(model.log_std))
-    else:
-        dist = tfd.Categorical(logits=est, dtype=env.action_space.dtype)
-
-    action = dist.sample()
-    logprob = tf.reduce_sum(dist.log_prob(action))
-
-    return action, logprob
-
-
 def run_one_episode(env, buf):
     obs_dtype = env.observation_space.dtype
+    act_dtype = env.action_space.dtype
 
     obs = env.reset()
     obs = tf.cast(obs, obs_dtype)
     done = False
 
     for i in range(buf.ptr, buf.size):
-        act, prob = action(buf.model, obs, env)
+        act, prob = buf.model.action(obs)
+        act = tf.cast(act, act_dtype)
         new_obs, rew, done, _ = env.step(act.numpy())
 
         buf.store(obs, act, rew, prob)
@@ -141,7 +106,7 @@ def run_one_episode(env, buf):
         buf.finish_path()
     else:
         while not done:
-            act, prob = action(buf.model, obs, env)
+            act, prob = buf.model.action(obs)
             new_obs, rew, done, _ = env.step(act.numpy())
         buf.finish_path(obs)
 
@@ -161,12 +126,8 @@ def train_one_epoch(env, batch_size, model, value_model, γ, λ):
 
     train_start_time = time.time()
 
-    var_list = list(model.trainable_weights)
-    if act_spc.shape:
-        var_list.append(model.log_std)
+    model.fit([batch.obs_buf, batch.act_buf, batch.gae, batch.prob_buf], epochs=80, steps_per_epoch=1, verbose=0)
 
-    for _ in range(80):
-        opt.minimize(batch.loss, var_list=var_list)
     hist = value_model.fit(batch.obs_buf.numpy(), batch.V_hats.numpy(), epochs=80, steps_per_epoch=1, verbose=0)
 
     train_time = time.time() - train_start_time
@@ -214,7 +175,7 @@ def test(epochs, env, model):
         episode_rew = 0
         while not done:
             env.render()
-            act, _ = action(model, obs, env)
+            act, _ = model.action(obs)
             obs, rew, done, _ = env.step(act.numpy())
             episode_rew += rew
         print("Episode reward", episode_rew)
@@ -224,6 +185,74 @@ class Parser(argparse.ArgumentParser):
         sys.stderr.write('error: %s\n' % message)
         self.print_help()
         sys.exit(2)
+
+class PolicyGradientTrainer(keras.Model):
+    def __init__(self, model, act_spc):
+        super().__init__()
+        self.continuous = bool(act_spc.shape)
+        self.model = model
+
+        if self.continuous:
+            self.log_std = self.add_weight(shape=act_spc.shape, initializer=-0.5)
+
+    @tf.function
+    def call(self, inputs):
+        x = self.model(inputs)
+
+        if self.continuous:
+            # x is mean vector
+            return x, self.std_dev
+        else:
+            # x is logits
+            return x
+
+    @tf.function
+    def policy(self, obs):
+        if self.continuous:
+            return tfd.MultivariateNormalDiag(self(obs), tf.exp(self.log_std))
+        else:
+            return tfd.Categorical(logits=self(obs))
+
+    @tf.function
+    def train_step(self, data):
+        (obs, act, adv, logprob), = data
+
+        var_list = list(self.trainable_weights)
+
+        with tf.GradientTape() as tape:
+            loss = self.compute_loss(obs, act, adv, logprob)
+
+        grads = tape.gradient(loss, var_list)
+        self.optimizer.apply(grads, trainable_variables=var_list)
+
+        for metric in self.metrics:
+            assert metric.name == "loss"
+            metric.update_state(loss)
+
+        return {m.name: m.result() for m in self.metrics}
+
+    @tf.function
+    def action(self, obs):
+        dist = self.policy(tf.expand_dims(obs, 0))
+
+        act = tf.squeeze(dist.sample(), axis=0)
+        logprob = tf.reduce_sum(dist.log_prob(act))
+
+        return act, logprob
+
+    @tf.function
+    def compute_loss(self, obs, act, adv, logprob):
+        eps = 0.1
+
+        dist = self.policy(obs)
+
+        new_logprob = dist.log_prob(act)
+
+        mask = tf.cast(adv >= 0, tf.float32)
+        epsilon_clip = mask * (1 + eps) + (1 - mask) * (1 - eps)
+        ratio = tf.exp(new_logprob - logprob)
+
+        return -tf.reduce_mean(tf.minimum(ratio * adv, epsilon_clip * adv))
 
 first_start_time = time.time()
 # training loop
@@ -251,7 +280,7 @@ if __name__ == '__main__':
     batch_size = 5000
     epochs = 200
     learning_rate = 3e-4
-    opt = tf.optimizers.Adam(learning_rate)
+    opt = keras.optimizers.Adam(learning_rate)
     γ = .99
     λ = 0.97
 
@@ -270,19 +299,22 @@ if __name__ == '__main__':
         act_spc = env.action_space
 
         # policy/actor model
-        model = tf.keras.models.Sequential([
-            tf.keras.layers.Dense(120, activation='relu', input_shape=obs_spc.shape),
-            tf.keras.layers.Dense(84, activation='relu'),
-            tf.keras.layers.Dense(act_spc.shape[0] if act_spc.shape else act_spc.n)
+        model = keras.models.Sequential([
+            keras.layers.Dense(120, activation='relu', input_shape=obs_spc.shape),
+            keras.layers.Dense(84, activation='relu'),
+            keras.layers.Dense(act_spc.shape[0] if act_spc.shape else act_spc.n)
         ])
-        if act_spc.shape:
-            model.log_std = tf.Variable(tf.fill(env.action_space.shape, -0.5))
         model.summary()
 
+        actor_model = PolicyGradientTrainer(model, env.action_space)
+        actor_model.compile(opt)
+
+        actor_model.summary()
+
         # value/critic model
-        value_model = tf.keras.models.Sequential([
-            tf.keras.layers.Dense(64, activation='relu', input_shape=obs_spc.shape),
-            tf.keras.layers.Dense(1)
+        value_model = keras.models.Sequential([
+            keras.layers.Dense(64, activation='relu', input_shape=obs_spc.shape),
+            keras.layers.Dense(1)
         ])
         value_model.compile('adam', loss='MSE')
         value_model.summary()
@@ -294,8 +326,7 @@ if __name__ == '__main__':
             env.render()
             test(epochs, env, model)
         else:
-            monitor_env = Monitor(env, 'recordings', force=True)
-            train(epochs, monitor_env, batch_size, model, value_model, γ, λ)
+            train(epochs, env, batch_size, actor_model, value_model, γ, λ)
             if save_dir==None:
                 save_dir = 'model/'
                 save_model(model, save_dir+env_name)

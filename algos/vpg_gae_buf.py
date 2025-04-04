@@ -1,7 +1,7 @@
 import tensorflow as tf
+import keras
 import tensorflow_probability as tfp
 tfd = tfp.distributions
-from gym.wrappers import Monitor
 import gym
 import pybullet_envs
 import time
@@ -138,7 +138,11 @@ def train_one_epoch(env, batch_size, model, value_model, γ, λ):
     if act_spc.shape:
         var_list.append(model.log_std)
 
-    opt.minimize(batch.loss, var_list=var_list)
+    with tf.GradientTape() as tape:
+        loss = batch.loss()
+
+    grads = tape.gradient(loss, var_list)
+    opt.apply(grads, trainable_variables=var_list)
 
     train_time = time.time() - train_start_time
     run_time = train_start_time - start_time
@@ -191,7 +195,7 @@ if __name__=="__main__":
     epochs = 100
     batch_size = 5000
     learning_rate = 1e-2
-    opt = tf.optimizers.Adam(learning_rate)
+    opt = keras.optimizers.Adam(learning_rate)
     γ = .99
     λ = 0.97
 
@@ -207,24 +211,23 @@ if __name__=="__main__":
         wandb.config.gamma = γ
 
         # construct the model
-        model = tf.keras.models.Sequential([
-            tf.keras.layers.Dense(120, activation='relu', input_shape=obs_spc.shape),
-            tf.keras.layers.Dense(84, activation='relu'),
-            tf.keras.layers.Dense(act_spc.shape[0] if act_spc.shape else act_spc.n)
+        model = keras.models.Sequential([
+            keras.layers.Dense(120, activation='relu', input_shape=obs_spc.shape),
+            keras.layers.Dense(84, activation='relu'),
+            keras.layers.Dense(act_spc.shape[0] if act_spc.shape else act_spc.n)
         ])
         if act_spc.shape:
             model.log_std = tf.Variable(tf.zeros(act_spc.shape))
         model.summary()
 
-        value_model = tf.keras.models.Sequential([
-            tf.keras.layers.Dense(64, activation='relu', input_shape=obs_spc.shape),
-            tf.keras.layers.Dense(1)
+        value_model = keras.models.Sequential([
+            keras.layers.Dense(64, activation='relu', input_shape=obs_spc.shape),
+            keras.layers.Dense(1)
         ])
         value_model.compile('adam', loss='MSE')
         value_model.summary()
 
         with tempfile.TemporaryDirectory(prefix='recordings', dir='.') as recordings:
-            monitor_env = Monitor(env, recordings, force=True)
             train(epochs, env, batch_size, model, value_model, γ, λ)
 
         wandb.finish()
