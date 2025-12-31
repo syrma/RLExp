@@ -2,8 +2,8 @@ import tensorflow as tf
 import keras
 import tensorflow_probability as tfp
 tfd = tfp.distributions
-import gym
-import pybullet_envs
+import gymnasium as gym
+import pybullet_envs_gymnasium
 import time
 import wandb
 import math
@@ -99,27 +99,28 @@ def action(model, obs, env):
 def run_one_episode(env, buf):
     obs_dtype = env.observation_space.dtype
 
-    obs = env.reset()
+    obs, _ = env.reset()
     obs = tf.cast(obs, obs_dtype)
-    done = False
+    terminated = False
+    truncated = False
 
     for i in range(buf.ptr, buf.size):
         act = action(buf.model, obs, env)
-        new_obs, rew, done, _ = env.step(act.numpy())
+        new_obs, rew, terminated, truncated, _ = env.step(act.numpy())
 
         buf.store(obs, act, rew)
         obs = new_obs
         obs = tf.cast(obs, obs_dtype)
 
-        if done:
+        if terminated or truncated:
             break
 
-    if done:
+    if terminated:
         buf.finish_path()
     else:
-        while not done:
-            act = action(buf.model, obs, env)
-            new_obs, rew, done, _ = env.step(act.numpy())
+        # while not (terminated or truncated):
+        #     act = action(buf.model, obs, env)
+        #     new_obs, rew, terminated, truncated, _ = env.step(act.numpy())
         buf.finish_path(obs)
 
 def train_one_epoch(env, batch_size, model, value_model, γ, λ):
